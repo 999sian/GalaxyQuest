@@ -1,0 +1,12 @@
+build*/
+*.apk
+*.idsig
+/out/
+build*.log
+link*.log
+tools/__pycache__/
+tools/cook/__pycache__/
+tools/cook/native/*.dll
+__pycache__/
+*.pyc
+/third_party/

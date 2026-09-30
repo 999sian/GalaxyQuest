@@ -229,7 +229,7 @@ void MarioActor::hideBeeFur() {
 
     if (mMario->isPlayerModeInvincible()) {
         _A6E = 0;
-        stopEffect("無敵中");
+        stopEffect("\x96\xb3\x93\x47\x92\x86");
     }
 }
 
@@ -695,7 +695,7 @@ void MarioActor::calcSpinEffect() {
     _6D4 = 0.0f;
     _6D8 = 0.0f;
 
-    if (selectAction("スピン回復エフェクト") != 1) {
+    if (selectAction("\x83\x58\x83\x73\x83\x93\x89\xf1\x95\x9c\x83\x47\x83\x74\x83\x46\x83\x4e\x83\x67") != 1) {
         return;
     }
 
@@ -821,8 +821,8 @@ void MarioActor::updateDarkMask(u16 unused) {
     u8* previous = mMaskTextures[_B88]->mImage;
     _B88 = 1 - _B88;
     u8* image = mMaskTextures[_B88]->mImage;
-    u8 x = MR::getRandom(0L, 8L);
-    u8 y = MR::getRandom(0L, 8L);
+    u8 x = MR::getRandom(0, 8);
+    u8 y = MR::getRandom(0, 8);
     s32 index = x + y * 8;
     image[index] = 0xF0;
     previous[index] = 0xF0;
@@ -905,7 +905,7 @@ void MarioActor::showBeeFur() {
     if (mMario->isPlayerModeInvincible()) {
         MR::showJoint(getJ3DModel(), "Face0");
         _A6E = 2;
-        playEffect("無敵中");
+        playEffect("\x96\xb3\x93\x47\x92\x86");
     }
 }
 

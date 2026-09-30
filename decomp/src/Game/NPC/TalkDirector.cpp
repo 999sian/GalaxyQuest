@@ -270,7 +270,7 @@ void TalkDirector::prepTalk(TalkMessageCtrl* pCtrl, bool arg2, bool arg3, bool a
         break;
     case 1:
         // "Discussion"
-        MR::tryStartDemoMarioPuppetable(pCtrl->mHostActor, "会話");
+        MR::tryStartDemoMarioPuppetable(pCtrl->mHostActor, "\x89\xef\x98\x62");
         MR::requestMovementOn(this);
         mBalloonHolder->pauseOff();
         mStateHolder->pauseOff();
@@ -289,7 +289,7 @@ void TalkDirector::termTalk() {
     if (mMessageInfo.isCameraNormal()) {
         MR::endNPCTalkCamera(false, -1);
     } else if (mMessageInfo.isCameraEvent()) {
-        MR::endMultiActorCamera(mHostActor, mCameraInfo, "会話", false, -1);
+        MR::endMultiActorCamera(mHostActor, mCameraInfo, "\x89\xef\x98\x62", false, -1);
     }
 
     if (!mIsInvalidClipping) {
@@ -305,7 +305,7 @@ void TalkDirector::termTalk() {
         MR::resumeTimeKeepDemo(control->mHostActor);
         break;
     case 1:
-        MR::endDemo(control->mHostActor, "会話");
+        MR::endDemo(control->mHostActor, "\x89\xef\x98\x62");
         break;
     }
 

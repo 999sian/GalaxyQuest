@@ -110,6 +110,9 @@ void TamakoroTutorial::requestEnd() {
 }
 
 void TamakoroTutorial::control() {
+#ifdef TARGET_PC
+    port_input_use_tilt(100.0f);  // as SphereAccelSensorController
+#endif
     MR::getCorePadAcceleration(&mPadAccel, WPAD_CHAN0);
     MR::normalizeOrZero(&mPadAccel);
 }
