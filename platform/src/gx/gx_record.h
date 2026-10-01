@@ -100,6 +100,8 @@ enum Marker : uint32_t {
     MARK_PLAYER_BEGIN = 5,
     MARK_PLAYER_END = 6,
     MARK_SCENE_DEPTH = 7,
+    MARK_POINTER_BEGIN = 8,
+    MARK_POINTER_END = 9,
 };
 
 struct Frame {

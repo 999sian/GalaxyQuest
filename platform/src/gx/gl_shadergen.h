@@ -75,7 +75,7 @@ enum : uint32_t {
     kRecPixel = 43,      // base of the pixel state in st[]
     kRecMtxIdxA = 44,    // XF 0x18 (default matrix indices)
     kRecMtxIdxB = 45,    // XF 0x19
-    kRecFlags = 46,      // bit 0: VR camera, bit 1: a sky around the game camera
+    kRecFlags = 46,      // bit 0: VR camera, bit 1: a sky around the game camera, bit 2: the pointer's cursor
     kRecWords = 48,
 };
 
@@ -108,10 +108,12 @@ struct PixelState {
 struct alignas(16) EyeBlock {
     float vrView[4][4];      // game view space -> eye space (rows)
     float vrProj[4][4];      // eye space -> clip (rows)
-    int32_t vrFlags[4];      // x: rendering for a VR eye
+    int32_t vrFlags[4];      // x: 1 rendering for a VR eye, 2 one picture of the flat screen's stereo pair
     float vrFocus[4];        // cutaway target (eye space), w > 0: enabled
     float vrCut[4];          // cutaway shape (see gpu::EyeView)
     float vrEyePos[4];       // the eye in game view space (lights at the camera move there)
+    float vrStereo[4];       // the stereo pair's shift (see gpu::EyeView::stereo)
+    float vrStereo2[4];      // x: the pointer cursor's shift, y: 1 = the cursor goes with the HUD (gpu::EyeView::pointer)
 };
 
 }  // namespace gpu

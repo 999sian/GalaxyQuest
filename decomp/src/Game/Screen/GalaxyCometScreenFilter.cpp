@@ -10,6 +10,19 @@ GalaxyCometScreenFilter::GalaxyCometScreenFilter() : LayoutActor("\x83\x52\x83\x
     appear();
 }
 
+#ifdef TARGET_PC
+// The filter tints the whole TV picture, darkest in the middle of its top.
+// In the VR diorama the game's 2D goes on a panel floating before the world,
+// where the filter was a black patch in the middle of the view with the
+// world showing all around it: left out there.
+void GalaxyCometScreenFilter::draw() const {
+    if (port_vr_diorama()) {
+        return;
+    }
+    LayoutActor::draw();
+}
+#endif
+
 void GalaxyCometScreenFilter::setCometType(const char* pCometName) {
     MR::setCometAnimFromId(this, MR::getCometNameIdFromString(pCometName), 0);
 }

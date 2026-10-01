@@ -248,7 +248,13 @@ void GameSystem::draw() {
     port_gx_marker(PORT_GX_MARK_HUD_BEGIN);
 #endif
     mSequenceDirector->draw();
+#ifdef TARGET_PC
+    port_gx_marker(PORT_GX_MARK_POINTER_BEGIN);
+#endif
     mObjHolder->drawStarPointer();
+#ifdef TARGET_PC
+    port_gx_marker(PORT_GX_MARK_POINTER_END);
+#endif
     mObjHolder->drawBeforeEndRender();
 
     if (mSystemWipeHolder != nullptr) {

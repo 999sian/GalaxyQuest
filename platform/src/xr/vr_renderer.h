@@ -69,6 +69,24 @@ void init();
 //                     the game's own camera; 0 for the diorama
 //   screen_distance   how far away the giant screen is, metres (4.5; it is
 //                     5.33 m wide, so 61 deg across at 4.5 m, 30 at 10 m)
+//   stereo_screen     1 to show the giant screen's picture in stereoscopic
+//                     3D, a picture for each eye from the game's camera
+//                     moved a little to either side (0, the default: the
+//                     same picture for both eyes)
+//   stereo_depth      how deep that 3D is, 0.25 .. 3 (1.75; "3D depth" on
+//                     the settings panel): how far before the farthest
+//                     things Mario is drawn, in distances between your eyes.
+//                     About 0.5 keeps the whole scene behind the screen
+//                     (little depth); more brings Mario and the ground
+//                     before him out of the screen
+//   stereo_far        how far apart the farthest things are drawn, in
+//                     distances between your eyes, 0.5 .. 1 (0.95; 1 puts
+//                     them at infinity)
+//   stereo_resolution size of each of the two pictures relative to the
+//                     screen's single one (2048x1152), 0.5 .. 1 (0.8): two
+//                     pictures cost the GPU twice one, and at 0.8 they
+//                     still have about a texel for each display pixel with
+//                     the screen 4.5 m away
 //   game_path         the folder of the game's files chosen on the setup
 //                     screen (empty: the app's own folder, files/game)
 //   turn_with_camera  1 to have the diorama turn with the game camera as it
@@ -99,6 +117,12 @@ void setSharpening(bool on);
 // Gameplay on the giant virtual screen instead of the diorama (giant_screen).
 bool giantScreen();
 void setGiantScreen(bool on);
+// The giant screen's picture in stereoscopic 3D (stereo_screen).
+bool stereoScreen();
+void setStereoScreen(bool on);
+// How deep it is (stereo_depth).
+float stereoDepth();
+void setStereoDepth(float depth);
 // A snap turn of the diorama: its view goes a step (45 deg) round Mario to
 // the right (dir > 0) or the left, behind a blink.  Returns false (the
 // press is the game's D-pad then) unless the diorama is shown with its own
@@ -115,14 +139,24 @@ float renderScale();
 // samples them once, at full sharpness whatever size the eye images are
 // rendered at, Super Resolution or not.  While they are on, the eye images
 // leave those panels out.
+enum { kBothEyes, kLeftEye, kRightEye };
 struct UiLayer {
     bool visible = false;               // goes out this frame
     bool changed = false;               // its image needs drawing (drawUiLayer)
     xm::Vec3 position{0, 0, 0};         // centre, stage space
     xm::Quat orientation{0, 0, 0, 1};   // the image faces +Z of this
     float width = 0.0f, height = 0.0f;  // metres
+    int eye = kBothEyes;                // which eyes see it
+    // The part of the layer's image that holds the picture, from its lower
+    // left corner (0: all of it).
+    int imageWidth = 0, imageHeight = 0;
 };
-enum { kHudLayer, kSettingsLayer, kScreenLayer, kSetupLayer, kUiLayerCount };
+// kScreenRightLayer: the right eye's picture of the virtual screen while it
+// shows a stereo pair (kScreenLayer is the left eye's then, and both eyes'
+// otherwise).
+enum { kHudLayer, kSettingsLayer, kScreenLayer, kSetupLayer, kScreenRightLayer, kUiLayerCount };
+// The UI layers from the bottom one to the top one.
+const int kUiLayerOrder[kUiLayerCount] = {kScreenLayer, kScreenRightLayer, kHudLayer, kSettingsLayer, kSetupLayer};
 void setUiLayers(bool on);
 bool uiLayers();
 // Image size of a UI layer (its swapchain).
@@ -185,7 +219,8 @@ void pointerLost();
 // True once for each new target the game's pointer touched since the last
 // call (for a haptic tick).
 bool takePointerTouch();
-// Length of the laser drawn from the controller this frame, metres.
+// The ray is on one of the VR layer's own panels (after pointerFromRay for
+// the frame): the length of the laser drawn from the controller, metres.
 void setAimLength(float metres);
 
 // Diorama distance (Mario's distance in front of the player, metres), as

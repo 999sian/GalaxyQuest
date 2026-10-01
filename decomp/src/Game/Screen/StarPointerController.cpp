@@ -81,6 +81,11 @@ void StarPointerController::storeDataFromCallback(const f32* pProjectionParams, 
         }
 #endif
         mInfo.mViewDistZ = calcViewDistanceZ(mWorldPos, MR::getStarPointerViewMtx());
+#ifdef TARGET_PC
+        if (mPadChannel == WPAD_CHAN0) {
+            port_vr_pointer_depth(mInfo.mViewDistZ);
+        }
+#endif
     }
 
     mPastInfo = mInfo;

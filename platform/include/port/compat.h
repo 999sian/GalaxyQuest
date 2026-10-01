@@ -77,6 +77,8 @@ void port_input_use_tilt(float neutralPitchDeg);
 #define PORT_GX_MARK_PLAYER_BEGIN 5  // the player's model and what it carries (motion vectors of their own)
 #define PORT_GX_MARK_PLAYER_END 6
 #define PORT_GX_MARK_SCENE_DEPTH 7  // the 3D scene's depth is complete (image effects and a Z clear follow)
+#define PORT_GX_MARK_POINTER_BEGIN 8  // the pointer's 2D cursor (inside the HUD markers)
+#define PORT_GX_MARK_POINTER_END 9
 #define PORT_GX_CAMERA_WORDS 33
 // Word 25 of the camera record: presentation hints.
 #define PORT_GX_CAMERA_DIORAMA 1     // gameplay: show the scene as a VR diorama
@@ -108,6 +110,11 @@ int port_vr_pointer_ray(float* origin, float* dir);
 // surface, or open space where star bits aim past the player.  Reported each
 // frame; the VR layer draws the laser that long.
 void port_vr_pointer_reach(float distance);
+// How far in front of the game camera the point under the pointer's 2D
+// cursor lies (game units; the first map surface on the camera's ray through
+// it, or the far plane).  Reported each frame; the stereoscopic screen draws
+// the cursor at that depth, on what it points at.
+void port_vr_pointer_depth(float depth);
 // Called each frame the game's pointer touches a target (`id` identifies it);
 // the VR layer pulses the reticle and ticks the controller on a new touch.
 void port_vr_pointer_touched(unsigned long long id);

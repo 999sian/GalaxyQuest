@@ -35,6 +35,8 @@ layout(std140, binding = 2) uniform EyeBlock {
     vec4 vrFocus;
     vec4 vrCut;
     vec4 vrEyePos;
+    vec4 vrStereo;
+    vec4 vrStereo2;
 };
 )";
 
@@ -152,7 +154,8 @@ std::string genVertexShader(const ShaderUid& u) {
     o.w("  vec4 c = vec4(dot(proj[0], v4), dot(proj[1], v4), dot(proj[2], v4), dot(proj[3], v4));\n");
     o.w("  float depth = (c.z * depthParams.x + c.w * depthParams.y) * (1.0 / 16777215.0);\n");
     o.w("  v_gxz = c.w != 0.0 ? depth / c.w : depth;\n");
-    o.w("  bool vrDraw = (recs[rb + %uu] & 1u) != 0u && vrFlags.x != 0;\n", (unsigned)kRecFlags);
+    o.w("  bool vrDraw = (recs[rb + %uu] & 1u) != 0u && vrFlags.x == 1;\n", (unsigned)kRecFlags);
+    o.w("  bool stereoDraw = (recs[rb + %uu] & 1u) != 0u && vrFlags.x == 2;\n", (unsigned)kRecFlags);
     o.w("  vec4 clipPos;\n");
     o.w("  if (vrDraw && (recs[rb + %uu] & 2u) != 0u) {\n", (unsigned)kRecFlags);
     // A sky is modelled around the game camera, which is metres away from
@@ -166,6 +169,24 @@ std::string genVertexShader(const ShaderUid& u) {
     o.w("    clipPos = vec4(dot(vrProj[0], e), dot(vrProj[1], e), dot(vrProj[2], e), dot(vrProj[3], e));\n");
     if (u.cutaway) o.w("    v_eye = e.xyz;\n");
     o.w("  } else {\n");
+    // One picture of the flat screen's stereo pair: the game's own camera a
+    // little to the side, its frustum sheared so what is vrStereo.y away
+    // lands where it does without (the screen's own depth).  Nearer things
+    // shift the other way, at most vrStereo.z times as far as the farthest
+    // ones; a sky belongs with the farthest.
+    o.w("    if (stereoDraw) c.x += vrStereo.x * min(((recs[rb + %uu] & 2u) != 0u ? 0.0 : vrStereo.y) - c.w, vrStereo.z * c.w);\n",
+        (unsigned)kRecFlags);
+    if (u.hud) {
+        // The HUD of a stereo pair: shifted as a whole (it floats before
+        // the screen, in front of the scene it is drawn over) and widened by
+        // as much, so what covers the whole picture (a fade) still does.
+        // The pointer's cursor on the scene goes where what it points at is
+        // drawn instead (on menus it stays with the HUD).
+        o.w("    if (vrFlags.x == 2) {\n");
+        o.w("      if ((recs[rb + %uu] & 4u) != 0u && vrStereo2.y == 0.0) c.x += vrStereo2.x * c.w;\n", (unsigned)kRecFlags);
+        o.w("      else c.x = c.x * (1.0 + abs(vrStereo.w)) + vrStereo.w * c.w;\n");
+        o.w("    }\n");
+    }
     o.w("    clipPos = vec4(c.x, c.y, depth * 2.0 * 1.0 - c.w, c.w);\n");
     if (u.cutaway) o.w("    v_eye = vec3(0.0, 0.0, 1.0e6);  // never cut\n");
     o.w("  }\n");
@@ -302,9 +323,9 @@ std::string genVertexShader(const ShaderUid& u) {
         }
         if ((u.screenTexGens >> i) & 1) {
             // A capture of the screen sampled where the vertex lands on it.
-            // In VR the capture holds this eye's view: use the eye's screen
-            // position (texture rows run top-down).
-            o.w("    if (vrDraw) t = vec3((clipPos.x + clipPos.w) * 0.5, (clipPos.w - clipPos.y) * 0.5, clipPos.w);\n");
+            // In VR (and in a stereo pair) the capture holds this eye's view:
+            // use the eye's screen position (texture rows run top-down).
+            o.w("    if (vrDraw || stereoDraw) t = vec3((clipPos.x + clipPos.w) * 0.5, (clipPos.w - clipPos.y) * 0.5, clipPos.w);\n");
         }
         o.w("    v_tex%u = t;\n  }\n", i);
     }

@@ -57,7 +57,10 @@ of you.
 game's own camera, as it did on a TV; switch *Giant screen* off in the VR
 settings (next to the pause menu) for the diorama. The settings panel also
 sets how far away the screen is: 4.5 m by default, farther for a TV seen
-from the couch, nearer for a cinema.
+from the couch, nearer for a cinema. Switch *Stereoscopic 3D* on there and
+each eye gets its own picture, as in a 3D cinema: the game's world gets
+real depth, far behind the screen and out in front of it (*3D depth* sets
+how much).
 
 **Comfort.** Turning happens in steps behind a short blink, sudden changes
 of gravity also happen behind a blink, and the edges of the view darken

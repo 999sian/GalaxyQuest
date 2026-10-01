@@ -176,12 +176,12 @@ extern "C" void port_headless_xrsim(const char* path, int frames, float yawDeg, 
             sUsed = vr::renderEye(e, fi, sFbo[e], kW, kH);
         }
         if (sLayers) {
-            static const int kOrder[vr::kUiLayerCount] = {vr::kScreenLayer, vr::kHudLayer, vr::kSettingsLayer, vr::kSetupLayer};  // bottom to top
-            for (int k : kOrder) {
+            for (int k : vr::kUiLayerOrder) {
                 vr::UiLayer l = vr::uiLayer(k);
                 if (!l.visible) continue;
                 if (l.changed) vr::drawUiLayer(k, sLayerFbo[k]);
                 for (int e = 0; e < 2; e++) {
+                    if (l.eye != vr::kBothEyes && l.eye != (e == 0 ? vr::kLeftEye : vr::kRightEye)) continue;
                     glBindFramebuffer(GL_FRAMEBUFFER, sFbo[e]);
                     glViewport(0, 0, sUsed.width, sUsed.height);
                     vr::compositeUiLayer(k, sLayerTex[k], fi.eyes[e].proj * fi.eyes[e].view);

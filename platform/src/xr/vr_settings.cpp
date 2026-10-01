@@ -4,8 +4,9 @@
 // distance, how far in front of the player Mario stands (while the giant
 // screen is on, the slider sets the screen's distance instead), SpaceWarp
 // ("smooth motion"), Super Resolution, FidelityFX CAS sharpening, the
-// lowest render resolution and the giant screen (gameplay on a big virtual
-// screen instead of the diorama).  A change applies at once (the paused scene
+// lowest render resolution, the giant screen (gameplay on a big virtual
+// screen instead of the diorama) and its stereoscopic 3D (a picture for each
+// eye, so the game has depth) with how deep it is.  A change applies at once (the paused scene
 // behind the menu moves), and the settings file (petari_vr.ini) is updated
 // when the menu closes.  In the headset the panel goes out as a compositor
 // layer of its own (vr::uiLayer), sharp whatever the eye images' size.
@@ -39,7 +40,7 @@ using ui::rgb;
 // ---------------------------------------------------------------------------
 // The panel
 // ---------------------------------------------------------------------------
-const int kTexW = 640, kTexH = 1058;
+const int kTexW = 640, kTexH = 1310;
 const float kWidthM = 0.42f;  // metres; height from the texture's aspect
 // Beside the pause menu's buttons, in the space right of them on the HUD
 // panel (see kHudCenter in vr_game.cpp), a little in front of it and turned
@@ -57,7 +58,9 @@ const Range& range() { return vr::giantScreen() ? kScreenRange : kDioramaRange; 
 float distanceNow() { return vr::giantScreen() ? vr::screenDistance() : vr::dioramaDistance(); }
 
 // Controls, in texture pixels (top-down rows).
-enum Control { kNone, kReset, kMinus, kPlus, kSlider, kSpaceWarp, kSuperRes, kSharpen, kResMinus, kResPlus, kGiant };
+enum Control {
+    kNone, kReset, kMinus, kPlus, kSlider, kSpaceWarp, kSuperRes, kSharpen, kResMinus, kResPlus, kGiant, kStereo, kDepthMinus, kDepthPlus
+};
 const float kRowY = 236.0f;
 const float kMinusX = 60.0f, kPlusX = 580.0f, kButtonR = 30.0f;
 const float kTrackX0 = 116.0f, kTrackX1 = 524.0f;
@@ -68,8 +71,11 @@ const float kSwitch2Y = 572.0f;
 const float kSwitch3Y = 698.0f;
 // The lowest resolution: - value + at the right of the last row.
 const float kResRowY = 824.0f, kResMinusX = 420.0f, kResPlusX = 580.0f, kResStep = 0.05f;
-// The giant screen switch, the last row.
+// The giant screen switch, and below it the last row: its stereoscopic 3D.
 const float kSwitch4Y = 950.0f;
+const float kSwitch5Y = 1076.0f;
+// The 3D's depth: - value + like the lowest resolution's, the last row.
+const float kDepthRowY = 1202.0f, kDepthStep = 0.25f;
 
 std::atomic<int> sMenuSelecting{0};
 std::atomic<int64_t> sMenuReportedAt{0};
@@ -136,6 +142,8 @@ void drawStatic() {
     c.roundRect(32, 904, kTexW - 32, 906, 1.0f, rgb(58, 63, 78));
     c.text(32, kSwitch4Y + 10, kFontSmall, "Giant screen", rgb(196, 202, 216));
     c.text(32, 1008, kFontSmall, "Play on a big screen, no diorama", rgb(140, 147, 163));
+    c.roundRect(32, 1030, kTexW - 32, 1032, 1.0f, rgb(58, 63, 78));
+    c.roundRect(32, 1156, kTexW - 32, 1158, 1.0f, rgb(58, 63, 78));
 }
 
 float sliderX(float distance) { return kTrackX0 + (kTrackX1 - kTrackX0) * (distance - range().min) / (range().max - range().min); }
@@ -185,18 +193,40 @@ void drawPanel() {
     }
     c.circle(kx, kRowY, active ? 22.0f : 19.0f, rgb(255, 255, 255));
 
-    // On/off switches: SpaceWarp, Super Resolution, CAS.
-    auto drawSwitch = [&](Control ctl, float y, bool on) {
+    // On/off switches: SpaceWarp, Super Resolution, CAS, the giant screen
+    // and its 3D (`live`: the switch has an effect as things are).
+    auto drawSwitch = [&](Control ctl, float y, bool on, bool live = true) {
         bool swActive = sHover == ctl || sPressed == ctl;
-        Color pill = on ? accent : swActive ? rgb(84, 93, 116) : rgb(58, 63, 78);
+        Color pill = on ? (live ? accent : rgb(52, 84, 128)) : swActive ? rgb(84, 93, 116) : rgb(58, 63, 78);
         c.roundRect(kSwitchX0, y - kSwitchR, kSwitchX1, y + kSwitchR, kSwitchR, pill);
-        c.circle(on ? kSwitchX1 - kSwitchR : kSwitchX0 + kSwitchR, y, swActive ? 19.0f : 17.0f, rgb(255, 255, 255));
-        c.text(kSwitchX0 - 16, y + 10, kFontSmall, on ? "On" : "Off", rgb(230, 234, 242), 2);
+        c.circle(on ? kSwitchX1 - kSwitchR : kSwitchX0 + kSwitchR, y, swActive ? 19.0f : 17.0f, live ? rgb(255, 255, 255) : rgb(150, 156, 170));
+        c.text(kSwitchX0 - 16, y + 10, kFontSmall, on ? "On" : "Off", live ? rgb(230, 234, 242) : rgb(140, 147, 163), 2);
     };
     drawSwitch(kSpaceWarp, kSwitchY, vr::spaceWarp());
     drawSwitch(kSuperRes, kSwitch2Y, vr::superResolution());
     drawSwitch(kSharpen, kSwitch3Y, vr::sharpening());
     drawSwitch(kGiant, kSwitch4Y, vr::giantScreen());
+    // The 3D belongs to the giant screen: dimmed while that is off.
+    c.text(32, kSwitch5Y + 10, kFontSmall, "Stereoscopic 3D", giant ? rgb(196, 202, 216) : rgb(140, 147, 163));
+    c.text(32, 1134, kFontSmall, giant ? "A picture for each eye" : "Only on the giant screen", rgb(140, 147, 163));
+    drawSwitch(kStereo, kSwitch5Y, vr::stereoScreen(), giant);
+    // Its depth: - value +, dimmed while there is no 3D.
+    bool stereo = giant && vr::stereoScreen();
+    c.text(32, kDepthRowY + 10, kFontSmall, "3D depth", stereo ? rgb(196, 202, 216) : rgb(140, 147, 163));
+    c.text(32, 1260, kFontSmall, "More brings the world out of the screen", rgb(140, 147, 163));
+    for (int i = 0; i < 2; i++) {
+        Control ctl = i == 0 ? kDepthMinus : kDepthPlus;
+        float x = i == 0 ? kResMinusX : kResPlusX;
+        Color fill = sPressed == ctl ? accent : sHover == ctl ? rgb(84, 93, 116) : rgb(44, 49, 62);
+        Color sign = stereo ? rgb(240, 243, 248) : rgb(140, 147, 163);
+        c.circle(x, kDepthRowY, kButtonR, fill);
+        c.roundRect(x - bar * 0.5f, kDepthRowY - thick * 0.5f, x + bar * 0.5f, kDepthRowY + thick * 0.5f, thick * 0.5f, sign);
+        if (ctl == kDepthPlus) {
+            c.roundRect(x - thick * 0.5f, kDepthRowY - bar * 0.5f, x + thick * 0.5f, kDepthRowY + bar * 0.5f, thick * 0.5f, sign);
+        }
+    }
+    snprintf(value, sizeof(value), "%.2f", vr::stereoDepth());
+    c.text((kResMinusX + kResPlusX) * 0.5f, kDepthRowY + 10, kFontSmall, value, stereo ? rgb(255, 255, 255) : rgb(140, 147, 163), 1);
 
     // Lowest resolution: - value +, and the scale the game renders at now.
     for (int i = 0; i < 2; i++) {
@@ -289,8 +319,10 @@ void save() {
     float sharpen = vr::sharpening() ? 1.0f : 0.0f;
     float minRes = vr::minResolution();
     float giant = vr::giantScreen() ? 1.0f : 0.0f;
+    float stereo = vr::stereoScreen() ? 1.0f : 0.0f;
+    float depth = vr::stereoDepth();
     PortHostAllocScope hostAlloc;
-    std::thread([path, distance, screen, spaceWarp, superRes, sharpen, minRes, giant] {
+    std::thread([path, distance, screen, spaceWarp, superRes, sharpen, minRes, giant, stereo, depth] {
         PortHostAllocScope scope;
         saveSetting(path, "diorama_distance", distance);
         saveSetting(path, "screen_distance", screen);
@@ -299,6 +331,8 @@ void save() {
         saveSetting(path, "sharpening", sharpen);
         saveSetting(path, "min_resolution", minRes);
         saveSetting(path, "giant_screen", giant);
+        saveSetting(path, "stereo_screen", stereo);
+        saveSetting(path, "stereo_depth", depth);
     }).detach();
 }
 
@@ -338,7 +372,8 @@ void setDistance(float d) {
 
 const char* controlName(Control c) {
     static const char* const kNames[] = {"nothing",        "Reset", "-", "+", "the slider", "the SpaceWarp switch", "the Super Resolution switch",
-                                         "the CAS switch", "resolution -", "resolution +", "the giant screen switch"};
+                                         "the CAS switch", "resolution -", "resolution +", "the giant screen switch",
+                                         "the stereoscopic 3D switch", "3D depth -", "3D depth +"};
     return kNames[c];
 }
 
@@ -354,6 +389,9 @@ Control controlAt(float x, float y) {
     if (near(x, y, kResMinusX, kResRowY, kButtonR + 10.0f)) return kResMinus;
     if (near(x, y, kResPlusX, kResRowY, kButtonR + 10.0f)) return kResPlus;
     if (x >= 24.0f && x <= kTexW - 16.0f && y >= kSwitch4Y - 36.0f && y <= kSwitch4Y + 36.0f) return kGiant;
+    if (x >= 24.0f && x <= kTexW - 16.0f && y >= kSwitch5Y - 36.0f && y <= kSwitch5Y + 36.0f) return kStereo;
+    if (near(x, y, kResMinusX, kDepthRowY, kButtonR + 10.0f)) return kDepthMinus;
+    if (near(x, y, kResPlusX, kDepthRowY, kButtonR + 10.0f)) return kDepthPlus;
     return kNone;
 }
 
@@ -467,9 +505,21 @@ float settingsPointer(xm::Vec3 origin, xm::Vec3 dir, bool clickDown) {
             sUnsaved = true;
             sChangedNs = now;
         }
+        if (over == kStereo) {
+            setStereoScreen(!stereoScreen());
+            port_log("vr settings: stereoscopic 3D %s%s", stereoScreen() ? "on" : "off", giantScreen() ? "" : " (for when the giant screen is on)");
+            sUnsaved = true;
+            sChangedNs = now;
+        }
         if (over == kResMinus || over == kResPlus) {
             setMinResolution(minResolution() + (over == kResPlus ? kResStep : -kResStep));
             port_log("vr settings: lowest resolution %.2f", minResolution());
+            sUnsaved = true;
+            sChangedNs = now;
+        }
+        if (over == kDepthMinus || over == kDepthPlus) {
+            setStereoDepth(stereoDepth() + (over == kDepthPlus ? kDepthStep : -kDepthStep));
+            port_log("vr settings: 3D depth %.2f", stereoDepth());
             sUnsaved = true;
             sChangedNs = now;
         }
@@ -487,6 +537,13 @@ float settingsPointer(xm::Vec3 origin, xm::Vec3 dir, bool clickDown) {
         if ((sPressed == kResMinus || sPressed == kResPlus) && over == sPressed && now - sPressNs > 450000000 && now - sRepeatNs > 150000000) {
             sRepeatNs = now;
             setMinResolution(minResolution() + (sPressed == kResPlus ? kResStep : -kResStep));
+            sDirty = true;
+            sUnsaved = true;
+            sChangedNs = now;
+        }
+        if ((sPressed == kDepthMinus || sPressed == kDepthPlus) && over == sPressed && now - sPressNs > 450000000 && now - sRepeatNs > 250000000) {
+            sRepeatNs = now;
+            setStereoDepth(stereoDepth() + (sPressed == kDepthPlus ? kDepthStep : -kDepthStep));
             sDirty = true;
             sUnsaved = true;
             sChangedNs = now;

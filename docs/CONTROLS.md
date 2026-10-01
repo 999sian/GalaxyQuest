@@ -48,15 +48,19 @@ laser never counts as a shake.
   the first surface in its way, or far past Mario into open space. Star
   bits you shoot leave from the controller and fly along the laser to its
   end.
+- **On the giant screen:** the game's own star cursor shows where the
+  controller points, as with a Wii Remote and a TV; no laser is drawn to
+  it. The laser only shows while you point at the VR settings panel.
 - **In menus:** the pause menu and yes/no prompts appear on the HUD panel in
   front of you, and the title and file select appear on the virtual screen.
   Point at them directly, the same way you point a Wii Remote at a TV.
 
 ## View
 
-- To recentre, hold the Meta button on the right controller. The diorama
-  and HUD panel are placed relative to your head when the app starts or
-  recentres.
+- The screen, the diorama and the HUD panel are placed straight ahead of
+  where you are and face when the game starts, and again when you put the
+  headset back on. To recentre at any time, hold the Meta button on the
+  right controller.
 - By default the world is at 1/500 scale, with Mario about 1.5 m in front
   of you and 0.8 m below eye level.
 - When scenery hides Mario from you, the part between you and him fades
@@ -142,12 +146,29 @@ towards you. Aim the right controller at it and press A or pull the trigger:
   **screen distance** instead of Mario's: 2.5 m to 10 m in steps of 0.5 m,
   4.5 m by default. The screen is 5.33 m wide, so it spans 61 degrees at
   4.5 m and 30 degrees (a TV seen from the couch) at 10 m.
+- **Stereoscopic 3D** (off by default) shows the giant screen's picture in
+  3D: the game is drawn once for each eye, from its own camera moved a
+  little to either side. The sky and distant scenery lie far behind the
+  screen, Mario stands a little in front of it and the ground before him
+  comes out towards you. The HUD, the text and the menus float in front of
+  the scene; the pointer's star cursor lies on whatever it points at in the
+  scene (and with the menus while you point at those). The GPU draws two pictures of the game each frame instead of
+  one, so each is a little smaller (0.8 of the single picture's size,
+  `stereo_resolution` below). The switch does nothing while the giant
+  screen is off (the diorama is 3D anyway).
+- **3D depth** (- and +, 1.75 by default, 0.25 to 3) is how deep that 3D
+  is. Around 0.5 the whole scene stays behind the screen, like a window,
+  and the effect is slight: a screen 4.5 m away leaves little room for
+  depth behind it. More brings Mario and the world out of the screen
+  towards you, which is where the depth shows; too much is tiring to look
+  at. The paused scene changes as you press, so you can pick by eye. Moving
+  the screen nearer (the slider at the top) deepens it too.
 
 The paused scene behind the menu moves as you change the distance, so you
 can judge it before you carry on. The settings are kept in
 `diorama_distance`, `screen_distance`, `space_warp`, `super_resolution`,
-`sharpening`, `min_resolution` and `giant_screen` in `petari_vr.ini` (see
-below), written when the menu closes.
+`sharpening`, `min_resolution`, `giant_screen`, `stereo_screen` and
+`stereo_depth` in `petari_vr.ini` (see below), written when the menu closes.
 
 ## Comfort settings
 
@@ -205,6 +226,20 @@ sharpening_strength = 0.5
 # 5.33 m wide: 61 degrees across at 4.5 m, 30 degrees at 10 m).
 giant_screen = 1
 screen_distance = 4.5
+# The giant screen in stereoscopic 3D (1; 0, the default, shows both eyes
+# the same picture). stereo_depth is how deep it looks (0.25 to 3, "3D
+# depth" on the VR settings panel): how far in front of the farthest things
+# Mario is drawn, in distances between your eyes; about 0.5 keeps everything
+# behind the screen, more brings the world out of it. stereo_far is how far
+# apart the farthest things are drawn, in distances between your eyes (0.5
+# to 1): at 1 they look infinitely far away, and it cannot be more.
+# stereo_resolution is the size of each of the two pictures relative to the
+# single one (0.5 to 1): 1 is sharpest but takes the GPU a quarter longer
+# than 0.8, and frames come late in busy scenes.
+stereo_screen = 0
+stereo_depth = 1.75
+stereo_far = 0.95
+stereo_resolution = 0.8
 # The folder of the game's files, as chosen on the setup screen (the app's
 # own files/game when there is no such line).
 # game_path = /storage/emulated/0/Download/cooked

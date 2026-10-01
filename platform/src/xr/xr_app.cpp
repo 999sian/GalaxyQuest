@@ -68,7 +68,20 @@ struct App {
     XrInstance instance = XR_NULL_HANDLE;
     XrSystemId system = XR_NULL_SYSTEM_ID;
     XrSession session = XR_NULL_HANDLE;
+    // The app's space: the runtime's LOCAL space turned and moved so the
+    // player faces the screen where they stand when a session starts (see
+    // updateAppSpace).
     XrSpace appSpace = XR_NULL_HANDLE;
+    XrSpace localSpace = XR_NULL_HANDLE, viewSpace = XR_NULL_HANDLE;
+    bool facePlayerDue = false;  // a session began, or the player recentred the view: the app's space is set to the head's pose
+    XrTime facePlayerAfter = 0;  // not before this time (when a recentring takes effect)
+    // A session's first seconds: the head's pose in LOCAL is watched for a
+    // jump (the headset finding its place in the room after waking up).
+    bool faceWatchStart = false;
+    XrTime faceWatchUntil = 0;
+    bool lastHeadValid = false;
+    float lastHeadYaw = 0.0f;
+    XrVector3f lastHeadPos{};
     XrSessionState state = XR_SESSION_STATE_UNKNOWN;
     bool sessionRunning = false;
     bool focused = false;
@@ -467,6 +480,9 @@ void initSession(App& a) {
     rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
     rs.poseInReferenceSpace.orientation.w = 1.0f;
     XR_CHECK(xrCreateReferenceSpace(a.session, &rs, &a.appSpace));
+    XR_CHECK(xrCreateReferenceSpace(a.session, &rs, &a.localSpace));
+    rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    XR_CHECK(xrCreateReferenceSpace(a.session, &rs, &a.viewSpace));
 
     XrSessionActionSetsAttachInfo att{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
     att.countActionSets = 1;
@@ -611,7 +627,7 @@ void initUiLayers(App& a) {
         // distant giant screen): with mipmaps the compositor filters it down
         // instead of skipping texels, which shimmered on fine detail.
         sc.mips = 1;
-        if (k == vr::kScreenLayer) {
+        if (k == vr::kScreenLayer || k == vr::kScreenRightLayer) {
             while ((std::max(sc.width, sc.height) >> sc.mips) > 0) sc.mips++;
         }
         ci.mipCount = sc.mips;
@@ -943,6 +959,8 @@ void handleEvents(App& a, bool& quit) {
                 bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
                 XR_CHECK(xrBeginSession(a.session, &bi));
                 a.sessionRunning = true;
+                a.facePlayerDue = true;
+                a.faceWatchStart = true;
                 requestRefreshRate(a);
                 requestPerformanceLevels(a);
             } else if (a.state == XR_SESSION_STATE_STOPPING) {
@@ -956,6 +974,17 @@ void handleEvents(App& a, bool& quit) {
         case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
             quit = true;
             break;
+        case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING: {
+            // The player recentred the view (the Meta button): the screen
+            // goes where they face now, once LOCAL has moved.
+            auto* rc = (XrEventDataReferenceSpaceChangePending*)&ev;
+            port_log("vr: reference space %d changes", (int)rc->referenceSpaceType);
+            if (rc->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_LOCAL) {
+                a.facePlayerDue = true;
+                a.facePlayerAfter = rc->changeTime;
+            }
+            break;
+        }
         case XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB: {
             auto* rc = (XrEventDataDisplayRefreshRateChangedFB*)&ev;
             port_log("display refresh rate %.0f -> %.0f Hz", rc->fromDisplayRefreshRate, rc->toDisplayRefreshRate);
@@ -980,6 +1009,89 @@ void handleEvents(App& a, bool& quit) {
         }
         ev = {XR_TYPE_EVENT_DATA_BUFFER};
     }
+}
+
+// The app's space puts the screen (and the diorama) straight ahead of where
+// the player is when a session starts: at launch, and when the headset is
+// put back on.  The runtime's LOCAL space alone starts at the pose of the
+// player's last recentring, which may point anywhere by the time the game
+// starts: the screen came up behind the player.  So on a session's first
+// frame with a tracked head pose, the app's space becomes LOCAL moved to the
+// head and turned to where it faces (about the vertical only: the floor stays
+// level).  The same when the player recentres with the Meta button, once
+// LOCAL has moved, and when the head's pose jumps in a session's first
+// seconds: a headset just woken up may still be finding its place in the
+// room, and takes LOCAL's contents with it when it does.
+void setAppSpace(App& a, const XrPosef& poseInLocal) {
+    XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+    rs.poseInReferenceSpace = poseInLocal;
+    XrSpace space = XR_NULL_HANDLE;
+    if (XR_FAILED(xrCreateReferenceSpace(a.session, &rs, &space))) {
+        return;
+    }
+    xrDestroySpace(a.appSpace);
+    a.appSpace = space;
+}
+
+void dropHeldEye(App& a);
+
+void updateAppSpace(App& a, XrTime time) {
+    if (a.faceWatchStart) {
+        a.faceWatchStart = false;
+        a.faceWatchUntil = time + 5000000000ll;
+        a.lastHeadValid = false;
+    }
+    if (!a.facePlayerDue && time >= a.faceWatchUntil) {
+        return;
+    }
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    const XrSpaceLocationFlags need = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
+                                      XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+    if (XR_FAILED(xrLocateSpace(a.viewSpace, a.localSpace, time, &loc)) || (loc.locationFlags & need) != need) {
+        a.lastHeadValid = false;
+        return;  // not tracking yet: the next frame
+    }
+    // The turn about the vertical, from the head's right axis (level however
+    // far the player looks up or down).
+    xm::Quat q{loc.pose.orientation.x, loc.pose.orientation.y, loc.pose.orientation.z, loc.pose.orientation.w};
+    xm::Vec3 right = xm::rotate(q, {1.0f, 0.0f, 0.0f});
+    float yaw = atan2f(-right.z, right.x);
+    // No head turns 30 degrees or moves half a metre from one frame to the
+    // next: the tracking jumped.
+    if (!a.facePlayerDue && a.lastHeadValid) {
+        const XrVector3f& p = loc.pose.position;
+        float turned = fabsf(remainderf(yaw - a.lastHeadYaw, 6.2831853f));
+        float moved = sqrtf((p.x - a.lastHeadPos.x) * (p.x - a.lastHeadPos.x) + (p.y - a.lastHeadPos.y) * (p.y - a.lastHeadPos.y) +
+                            (p.z - a.lastHeadPos.z) * (p.z - a.lastHeadPos.z));
+        if (turned > 0.52f || moved > 0.5f) {
+            port_log("vr: the head's pose jumped %.0f deg and %.2f m in a frame: tracking settled", turned * 57.29578f, moved);
+            a.facePlayerDue = true;
+        }
+    }
+    a.lastHeadValid = true;
+    a.lastHeadYaw = yaw;
+    a.lastHeadPos = loc.pose.position;
+    if (!a.facePlayerDue || time < a.facePlayerAfter) {
+        return;
+    }
+    a.facePlayerDue = false;
+    XrPosef pose{};
+    pose.orientation = {0.0f, sinf(yaw * 0.5f), 0.0f, cosf(yaw * 0.5f)};
+    pose.position = loc.pose.position;
+    setAppSpace(a, pose);
+    dropHeldEye(a);
+    // The head in the new space, for the log: straight ahead at its origin.
+    float now = 0.0f;
+    XrSpaceLocation check{XR_TYPE_SPACE_LOCATION};
+    if (XR_SUCCEEDED(xrLocateSpace(a.viewSpace, a.appSpace, time, &check)) && (check.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+        xm::Quat c{check.pose.orientation.x, check.pose.orientation.y, check.pose.orientation.z, check.pose.orientation.w};
+        xm::Vec3 r = xm::rotate(c, {1.0f, 0.0f, 0.0f});
+        now = atan2f(-r.z, r.x) * 57.29578f;
+    }
+    port_log("vr: the view starts where the player faces: %.0f deg round from the runtime's own, head at %.2f %.2f %.2f m there (now %.1f deg off "
+             "straight ahead)",
+             yaw * 57.29578f, pose.position.x, pose.position.y, pose.position.z, now);
 }
 
 // Eye poses and fields of view at `time`.
@@ -1026,11 +1138,36 @@ vr::FrameInfo frameInfo(const App& a, const XrView views[2], XrTime time) {
 // of a rendered set are saved side by side, at half size, to
 // <files>/vrshots/shot_NNN_fFRAME.png, to see the headset's picture from a
 // PC; with SpaceWarp, the left eye's motion vectors go to
-// shot_NNN_fFRAME_mv.png (see vr::motionDebugImage).  The read-back stalls
-// the frame loop a little each time.
+// shot_NNN_fFRAME_mv.png (see vr::motionDebugImage), and the virtual
+// screen's layers, which are not in the eye images, to
+// shot_NNN_fFRAME_screen.png (the next picture drawn for them; a stereo
+// pair as _screenL.png and _screenR.png).  The read-back stalls the frame
+// loop a little each time.
 std::string gShotDir;
 int64_t gShotIntervalNs = 0, gShotNextAt = 0;
 int gShotIndex = 0;
+std::string gShotScreenBase;  // the last shot's file name without ".png"
+bool gShotScreenDue[2] = {false, false};  // the screen's layers still to save for it: left / both eyes, right
+
+// Saves the screen layer picture just drawn into the bound framebuffer, if
+// one is due.
+void maybeSaveScreenShot(int k, const vr::UiLayer& l, int w, int h) {
+    int side = k == vr::kScreenRightLayer ? 1 : 0;
+    if (!gShotScreenDue[side]) {
+        return;
+    }
+    gShotScreenDue[side] = false;
+    if (l.eye == vr::kBothEyes) gShotScreenDue[1] = false;
+    std::shared_ptr<std::vector<unsigned char>> px(new std::vector<unsigned char>((size_t)w * h * 4));
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px->data());
+    std::string file = gShotScreenBase + (l.eye == vr::kBothEyes ? "_screen.png" : side ? "_screenR.png" : "_screenL.png");
+    PortHostAllocScope hostAlloc;
+    std::thread([px, w, h, file] {
+        PortHostAllocScope scope;
+        for (size_t i = 3; i < px->size(); i += 4) (*px)[i] = 255;
+        port_headless_write_png(file.c_str(), px->data(), w, h);
+    }).detach();
+}
 
 void maybeSaveShot(App& a, int s, const uint32_t idx[2], GLuint motionTex = 0) {
     if (gShotIntervalNs <= 0 || port_host_time_ns() < gShotNextAt) {
@@ -1047,6 +1184,8 @@ void maybeSaveShot(App& a, int s, const uint32_t idx[2], GLuint motionTex = 0) {
     char path[512];
     snprintf(path, sizeof(path), "%s/shot_%03d_f%llu.png", gShotDir.c_str(), gShotIndex++, (unsigned long long)gpu::renderer().frameNumber());
     std::string file = path;
+    gShotScreenBase = file.substr(0, file.size() - 4);
+    gShotScreenDue[0] = gShotScreenDue[1] = true;
     PortHostAllocScope hostAlloc;
     if (motionTex) {
         std::shared_ptr<std::vector<unsigned char>> mv(new std::vector<unsigned char>());
@@ -1172,6 +1311,7 @@ void renderFrame(App& a) {
     a.workStartNs = port_host_time_ns();
     XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
     XR_CHECK(xrBeginFrame(a.session, &bi));
+    updateAppSpace(a, fs.predictedDisplayTime);
 
     XrDuration period = fs.predictedDisplayPeriod;
     bool warp = a.hasSpaceWarp && vr::spaceWarp() && fabsf(a.displayHz - 120.0f) < 5.0f;
@@ -1387,14 +1527,18 @@ void renderFrame(App& a) {
     XrCompositionLayerSettingsFB quadSettings[vr::kUiLayerCount];
     uint32_t quadCount = 0;
     if (layerCount && vr::uiLayers()) {
-        static const int kOrder[vr::kUiLayerCount] = {vr::kScreenLayer, vr::kHudLayer, vr::kSettingsLayer, vr::kSetupLayer};  // bottom to top
-        for (int k : kOrder) {
+        for (int k : vr::kUiLayerOrder) {
             vr::UiLayer l = vr::uiLayer(k);
             if (!l.visible) continue;
             Swapchain& sc = a.ui[k];
             if (l.changed || !a.uiHasImage[k]) {
                 uint32_t idx = acquireImage(sc);
                 vr::drawUiLayer(k, sc.fbos[idx]);
+                if (k == vr::kScreenLayer || k == vr::kScreenRightLayer) {
+                    glBindFramebuffer(GL_FRAMEBUFFER, sc.fbos[idx]);
+                    maybeSaveScreenShot(k, l, l.imageWidth ? l.imageWidth : sc.width, l.imageHeight ? l.imageHeight : sc.height);
+                    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                }
                 if (sc.mips > 1) {
                     glBindTexture(GL_TEXTURE_2D, sc.images[idx].image);
                     glGenerateMipmap(GL_TEXTURE_2D);
@@ -1407,13 +1551,13 @@ void renderFrame(App& a) {
             q = {XR_TYPE_COMPOSITION_LAYER_QUAD};
             q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;  // premultiplied
             q.space = a.appSpace;
-            q.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+            q.eyeVisibility = l.eye == vr::kLeftEye ? XR_EYE_VISIBILITY_LEFT : l.eye == vr::kRightEye ? XR_EYE_VISIBILITY_RIGHT : XR_EYE_VISIBILITY_BOTH;
             q.subImage.swapchain = sc.handle;
-            q.subImage.imageRect = {{0, 0}, {sc.width, sc.height}};
+            q.subImage.imageRect = {{0, 0}, {l.imageWidth ? l.imageWidth : sc.width, l.imageHeight ? l.imageHeight : sc.height}};
             q.pose.orientation = {l.orientation.x, l.orientation.y, l.orientation.z, l.orientation.w};
             q.pose.position = {l.position.x, l.position.y, l.position.z};
             q.size = {l.width, l.height};
-            if (a.hasLayerSettings && k == vr::kScreenLayer) {
+            if (a.hasLayerSettings && (k == vr::kScreenLayer || k == vr::kScreenRightLayer)) {
                 // Meta's supersampling filter against the flicker of a layer
                 // with more texels than the display has pixels for it.
                 quadSettings[k] = {XR_TYPE_COMPOSITION_LAYER_SETTINGS_FB};

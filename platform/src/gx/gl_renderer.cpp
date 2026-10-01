@@ -252,6 +252,7 @@ struct Builder {
     bool inHud = false;
     bool inSky = false;     // between sky markers: drawn around the game camera
     bool inPlayer = false;  // between player markers
+    bool inPointer = false; // between pointer markers: the pointer's 2D cursor
     // The shader key of the last draw, reused while nothing it depends on
     // changed (hashing a key for each of ~40,000 draws was most of the
     // preparation time).
@@ -278,7 +279,7 @@ struct Builder {
     u32 appendRows(const float* src, int n, int stride);
     u32 addState(const float* data, size_t vec4s);
     void invalidateXf(u32 a0, u32 a1);
-    u32 drawRecord(bool useVr, bool sky, bool dualTex, u32 numTexGens);
+    u32 drawRecord(bool useVr, bool sky, bool pointer, bool dualTex, u32 numTexGens);
     void appendIndices(u32 kind, u32 base, u32 count);
     void fillLights(LightState& b);
     void fillProj(ProjState& b);
@@ -946,7 +947,7 @@ void Builder::invalidateXf(u32 a0, u32 a1) {
 }
 
 // The draw record for the current register state.
-u32 Builder::drawRecord(bool useVr, bool sky, bool dualTex, u32 numTexGens) {
+u32 Builder::drawRecord(bool useVr, bool sky, bool pointer, bool dualTex, u32 numTexGens) {
     u32 rec[kRecWords];
     memset(rec, 0, sizeof(rec));
     for (int i = 0; i < 22; i++) {
@@ -984,7 +985,7 @@ u32 Builder::drawRecord(bool useVr, bool sky, bool dualTex, u32 numTexGens) {
     rec[kRecPixel] = pixBase;
     rec[kRecMtxIdxA] = xfRegs[0x18];
     rec[kRecMtxIdxB] = xfRegs[0x19];
-    rec[kRecFlags] = (useVr ? 1u : 0u) | (useVr && sky ? 2u : 0u);
+    rec[kRecFlags] = (useVr ? 1u : 0u) | (useVr && sky ? 2u : 0u) | (pointer ? 4u : 0u);
     size_t n = recs.size();
     if (n >= kRecWords && memcmp(&recs[n - kRecWords], rec, sizeof(rec)) == 0) {
         return (u32)(n / kRecWords) - 1;
@@ -1170,6 +1171,7 @@ void Builder::build(std::shared_ptr<const Frame> frame, Prepared& out) {
     inHud = false;
     inSky = false;
     inPlayer = false;
+    inPointer = false;
     uidDirty = true;
     lastUidFlags = ~0u;
     drawStateDirty = true;
@@ -1247,6 +1249,10 @@ void Builder::build(std::shared_ptr<const Frame> frame, Prepared& out) {
             if (it.marker == MARK_PLAYER_BEGIN || it.marker == MARK_PLAYER_END) {
                 inPlayer = it.marker == MARK_PLAYER_BEGIN;
                 drawStateDirty = true;  // no batch spans the marker
+            }
+            if (it.marker == MARK_POINTER_BEGIN || it.marker == MARK_POINTER_END) {
+                inPointer = it.marker == MARK_POINTER_BEGIN;
+                drawStateDirty = true;  // the draw record changes
             }
             items.push_back(it);
             break;
@@ -1401,7 +1407,7 @@ void Builder::build(std::shared_ptr<const Frame> frame, Prepared& out) {
                 it.texMode1[t] = used ? bp[m0[t] + 4] : 0;
             }
 
-            u32 rec = drawRecord(it.useVr, inSky, uid.dualTex != 0, uid.numTexGens);
+            u32 rec = drawRecord(it.useVr, inSky, inPointer, uid.dualTex != 0, uid.numTexGens);
             u32 firstOrdinal = ordinal;
             ordinal += count;
             vtxRec.insert(vtxRec.end(), count, rec);
@@ -1759,7 +1765,9 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
     // Per-eye block.
     EyeBlock eb;
     memset(&eb, 0, sizeof(eb));
-    if (eye) {
+    // A VR eye, as opposed to a flat replay or one of its stereo pair.
+    bool vrEye = eye && !eye->flatStereo;
+    if (vrEye) {
         for (int i = 0; i < 16; i++) {
             eb.vrView[i / 4][i % 4] = eye->view[i];
             eb.vrProj[i / 4][i % 4] = eye->proj[i];
@@ -1768,6 +1776,11 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         memcpy(eb.vrFocus, eye->focus, sizeof(eb.vrFocus));
         memcpy(eb.vrCut, eye->cut, sizeof(eb.vrCut));
         memcpy(eb.vrEyePos, eye->eyePos, sizeof(eb.vrEyePos));
+    } else if (eye) {
+        eb.vrFlags[0] = 2;
+        memcpy(eb.vrStereo, eye->stereo, sizeof(eb.vrStereo));
+        eb.vrStereo2[0] = eye->pointer[0];
+        eb.vrStereo2[1] = eye->pointer[1];
     }
     eyeUbo = eyeUbos[eyeUboNext];
     eyeUboNext = (eyeUboNext + 1) % 8;
@@ -1778,7 +1791,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
     // the background on first use (a draw keeps its plain program until
     // then).  The variants are only used while needed: their discard costs
     // the GPU its early depth rejection.
-    bool cutActive = eye && eye->focus[3] > 0.0f;
+    bool cutActive = vrEye && eye->focus[3] > 0.0f;
     std::vector<GLuint>& cutProgs = this->cur->cutProgs;
     copySlot = eye ? 1 + (eye->index & 1) : 0;
     // PETARI_COPYDUMP_EYE=1: the left eye's copies instead of the flat replay's.
@@ -2008,7 +2021,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         }
         EfbTarget& t = *cur;
         float fx = (float)t.width / (float)nativeW, fy = (float)t.height / (float)nativeH;
-        if (it.useVr && eye) {
+        if (it.useVr && vrEye) {
             setViewport(0, 0, t.width, t.height);
             setScissor(false, 0, 0, 0, 0);
         } else {
@@ -2018,6 +2031,17 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
             setViewport(vx, vy, vw, vh);
             int sx = (int)lroundf(it.sc[0] * fx), sr = (int)lroundf(it.sc[2] * fx);
             int st = (int)lroundf(it.sc[1] * fy), sb = (int)lroundf(it.sc[3] * fy);
+            if (it.hud && eye && eye->flatStereo && eye->stereo[3] != 0.0f) {
+                // A stereo pair's HUD is shifted and widened (see the vertex
+                // shader): its scissor boxes go with it.
+                float shift = eye->stereo[3];
+                auto moved = [&](int x) {
+                    float n = (x * 2.0f / t.width - 1.0f) * (1.0f + fabsf(shift)) + shift;
+                    return (int)lroundf((n + 1.0f) * 0.5f * t.width);
+                };
+                sx = moved(sx);
+                sr = moved(sr);
+            }
             setScissor(true, sx, t.height - sb, sr - sx > 0 ? sr - sx : 0, sb - st > 0 ? sb - st : 0);
         }
 

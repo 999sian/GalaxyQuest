@@ -214,10 +214,11 @@ void main() {
 const char* kLayerFs = R"(#version 320 es
 precision mediump float;
 uniform sampler2D uTex;
+uniform vec2 uUvScale;  // the part of the image used
 in vec2 vUv;
 out vec4 oColor;
 %s
-void main() { oColor = texture(uTex, vUv); }
+void main() { oColor = texture(uTex, vUv * uUvScale); }
 )";
 
 const char* kLaserVs = R"(#version 320 es
@@ -328,7 +329,7 @@ void main() {
 )";
 
 GLuint sQuadProgram, sLaserProgram, sLayerProgram, sVao;
-GLint sLayerTex, sLayerMvp;
+GLint sLayerTex, sLayerMvp, sLayerUvScale;
 // Composite programs: plain, CAS at 1:1, CAS scaling.
 struct BlitProgram {
     GLuint program = 0;
@@ -344,6 +345,7 @@ GLint sMotionQuadTex, sMotionQuadMvp, sMotionQuadAlphaMin, sMotionQuadMatrix, sM
 // Pointer ray from the last input update (stage space).
 std::atomic<int> sPointerInWorld{0};
 bool sAimValid = false;
+bool sAimOnPanel = false;  // the ray is on one of the VR layer's own panels (settings, setup)
 xm::Vec3 sAimOrigin{0, 0, 0}, sAimDir{0, 0, -1};
 // Screen wipe reported by the game (see port_vr_wipe).
 std::mutex sWipeLock;
@@ -418,7 +420,11 @@ bool sSharpen = false;        // AMD FidelityFX CAS in the composite
 float sSharpness = 0.5f;      // its strength, 0..1
 float sMinScale = 0.8f;       // lowest render scale (min_resolution)
 bool sGiantScreen = true;     // gameplay on the giant virtual screen (giant_screen; the default at first start)
-bool sFlatFresh = false;      // eye 0 drew the virtual screen's picture since its layer last took it
+bool sStereoScreen = false;   // the giant screen's picture as a stereo pair (stereo_screen)
+float sStereoDepth = 1.75f;   // how far before the farthest things Mario is drawn, in eye distances (stereo_depth)
+float sStereoFar = 0.95f;     // the farthest things' distance apart on the screen, in eye distances (stereo_far)
+float sStereoSize = 0.8f;     // each picture's size relative to the screen's single one (stereo_resolution)
+bool sFlatFresh = false;      // the virtual screen's picture was drawn since its layer last took it
 bool sUiLayers = false;       // the panels with text go out as compositor layers (vr::setUiLayers)
 bool sHudFresh = false;       // eye 0 drew the HUD since the HUD layer last took it
 int sHudDraws = 0;            // draws in that HUD
@@ -427,7 +433,8 @@ xm::Mat4 sStageFromView = xm::Mat4::identity();
 uint64_t sLastFrame = 0;
 std::string sSettingsPath;  // petari_vr.ini
 
-// Panels in stage space (LOCAL: origin at the head's start position).
+// Panels in stage space (the app's space: its origin is the head's position
+// when the session started, facing where it faced; see xr_app.cpp).
 // The virtual screen (menus, cutscenes): 3.2 m wide 2.6 m away.  The giant
 // screen (gameplay from the game's camera): 5.33 m wide (3 m tall),
 // screen_distance away; at the default 4.5 m it spans 61 deg, a big TV seen
@@ -439,6 +446,94 @@ xm::Vec3 screenCenter() { return sGiantScreen ? xm::Vec3{0.0f, 0.0f, -sScreenDis
 float screenWidth() { return sGiantScreen ? 5.33f : 3.2f; }
 const xm::Vec3 kHudCenter{0.0f, -0.08f, -1.0f};
 const float kHudWidth = 1.45f;
+
+// ---------------------------------------------------------------------------
+// The giant screen in stereoscopic 3D (stereo_screen).  The game frame is
+// replayed twice from the game's own camera, once for each eye, with the 3D
+// draws shifted sideways by their depth (gpu::EyeView::flatStereo): as from
+// two cameras a little apart whose frustums meet at the "convergence" depth.
+// What is that far from the camera looks to be on the screen itself, what is
+// farther lies behind it as through a window, and what is nearer comes out
+// in front.  Each eye is shown its own picture (two layers, or the eye
+// images' own panels).
+//
+// Depth: how far apart the two pictures draw a point, in distances between
+// the player's eyes (taken from the two eye poses), is
+//     stereo_far - stereo_depth * (Mario's depth / the point's depth)
+// positive: behind the screen, negative: before it.  The farthest things
+// (the sky) get stereo_far, 0.95: the lines of sight to them are almost
+// parallel, as to things at infinity, and more would make the eyes turn
+// outwards.  That is as far behind the screen as anything can look, and it
+// is little: under a degree between the screen 4.5 m away and infinity.
+// With the whole scene behind the screen (stereo_depth about 0.5) the 3D was
+// barely there.  So the scene comes out of the screen instead: stereo_depth
+// (1.75, the settings panel's "3D depth") is how far before the farthest
+// things Mario is drawn.  At 1.75 he stands two metres before the screen and
+// the ground before him nearer still: a model of the world reaching out of
+// the screen, several times the depth.  The convergence that gives is stereo_depth / stereo_far times
+// Mario's depth (or that of what the camera looks at, if nearer); it follows
+// the camera smoothly, and jumps when the camera does.  Nothing is drawn more
+// than kStereoNear eye distances apart before the screen (2.5: 1.3 m from the
+// player with the screen 4.5 m away), whatever comes right up to the camera.
+// The HUD (the draws between the HUD markers: counters, text, menus, the
+// pointer's cursor) would look wrong on the screen itself, behind the scene
+// it covers.  It floats before the screen as a whole, where the ground
+// half as far as Mario is drawn (stereo_far - 2 * stereo_depth, when that is
+// before the screen).  Everything else drawn flat stays on the screen.
+// The pointer's cursor is part of the HUD, but floating there it stopped
+// short of the scene it points into (the eyes on what it pointed at saw it
+// double).  While it points into the scene it is drawn as far apart as the
+// point under it (port_vr_pointer_depth: the game's own ray through the
+// cursor against the map), so it lies on what it points at; on menus it
+// stays with the HUD.
+// Cost: the GPU's time for a frame goes mostly with the pixels drawn, so the
+// two pictures are smaller than the single one (stereo_resolution, 0.8:
+// 1638x922 for 2048x1152, still about a texel for each display pixel with
+// the screen 4.5 m away).  They go into the lower left part of the layers'
+// images as they are, and the compositor does the one scaling to the display.
+// ---------------------------------------------------------------------------
+const float kStereoNear = 2.5f;  // the nearest things' distance apart before the screen, in eye distances
+gpu::EfbTarget sFlatPair[2];    // the left and the right eye's picture
+bool sFlatRightFresh = false;   // the right one was drawn since its layer last took it
+bool sStereoFrame = false;      // the game frame on show is rendered as a stereo pair
+bool sStereoShown = false;      // the picture last finished for the screen is a stereo pair
+float sConvergence = 0.0f;      // game units, following the camera
+float sStereoShift = 0.0f;      // the farthest things' shift for one eye, in half screen widths
+float sStereoHudShift = 0.0f;   // the HUD's, the other way
+float sPointerParallax = -1.0f; // the pointer cursor's shift on the scene, in shifts of the farthest things
+bool sPointerOnHud = false;     // the pointer is on menus: its cursor goes with the HUD
+// The depth of the point under the game's pointer cursor (see
+// port_vr_pointer_depth).
+std::atomic<float> sPointerDepth{0.0f};
+std::atomic<int64_t> sPointerDepthAt{0};
+
+// Once per frame of a stereo pair: the convergence for the frame's camera,
+// and the shifts for the distance between the player's eyes.
+void updateStereo(const vr::FrameInfo& frame, const gpu::CameraInfo& cam, float dt) {
+    auto depth = [&cam](const float* p) { return -(cam.view[8] * p[0] + cam.view[9] * p[1] + cam.view[10] * p[2] + cam.view[11]); };
+    float d = depth(cam.watch);
+    if (cam.flags & PORT_GX_CAMERA_PLAYER) {
+        float player = depth(cam.player);
+        if (player > 50.0f) d = d > 50.0f ? fminf(d, player) : player;
+    }
+    if (!(d > 50.0f)) d = 1500.0f;  // nothing in front of the camera to go by
+    float target = fminf(6000.0f, fmaxf(150.0f, d * sStereoDepth / sStereoFar));
+    if (!sStereoShown || sConvergence <= 0.0f || target > 2.0f * sConvergence || target < 0.5f * sConvergence) {
+        sConvergence = target;  // the first frame, or a cut
+    } else {
+        sConvergence += (target - sConvergence) * (1.0f - powf(0.5f, dt / 0.4f));
+    }
+    float ipd = xm::length(frame.eyes[1].position - frame.eyes[0].position);
+    ipd = ipd > 0.045f && ipd < 0.08f ? ipd : 0.063f;
+    sStereoShift = sStereoFar * ipd / screenWidth();
+    sStereoHudShift = fminf(kStereoNear, fmaxf(0.0f, 2.0f * sStereoDepth - sStereoFar)) * ipd / screenWidth();
+    // The cursor follows the depth under it quickly, but not in jumps as it
+    // crosses an edge.
+    float under = port_host_time_ns() - sPointerDepthAt.load() < 250000000 ? sPointerDepth.load() : 0.0f;
+    float parallax = under > 1.0f ? fminf(kStereoNear / sStereoFar, fmaxf(-1.0f, sConvergence / under - 1.0f)) : -1.0f;
+    sPointerParallax += (parallax - sPointerParallax) * (1.0f - powf(0.5f, dt / 0.05f));
+    sPointerOnHud = (cam.flags & PORT_GX_CAMERA_POINTER_UI) != 0;
+}
 
 GLuint compile(GLenum type, const char* fmt, bool withCommon) {
     char src[8192];
@@ -537,6 +632,10 @@ float panelDistance(xm::Vec3 o, xm::Vec3 d, xm::Vec3 center) {
 // Beam from the right controller to where it points, plus a reticle there.
 void drawLaser(const vr::EyeInfo& eye, const xm::Mat4& viewProj) {
     if (!sAimValid || overlayBrightness() <= 0.0f) return;
+    // On the giant screen the game's own cursor shows where the controller
+    // points, as on a TV: no beam from the controller to it.  The VR layer's
+    // own panels have no cursor, so the beam stays for those.
+    if (sGiantScreen && !sVrMode && !sAimOnPanel && !vr::setupActive()) return;
     xm::Vec3 p0 = sAimOrigin, p1 = sAimOrigin + sAimDir * sAimLength;
     xm::Vec3 toEye = xm::normalize(eye.position - (p0 + p1) * 0.5f);
     xm::Vec3 across = xm::normalize(xm::cross(sAimDir, toEye));
@@ -728,6 +827,11 @@ extern "C" void port_vr_pointer_touched(unsigned long long id) {
     sLastTouchSeen.store(now);
 }
 
+extern "C" void port_vr_pointer_depth(float depth) {
+    sPointerDepth.store(depth);
+    sPointerDepthAt.store(port_host_time_ns());
+}
+
 extern "C" void port_vr_pointer_reach(float distance) {
     sReachWorld.store(distance);
     sReachAt.store(port_host_time_ns());
@@ -822,6 +926,14 @@ void loadSettings(const char* path) {
             sGiantScreen = value != 0.0f;
         } else if (!strcmp(key, "screen_distance") && value >= 1.0f && value <= 20.0f) {
             sScreenDistance = value;
+        } else if (!strcmp(key, "stereo_screen")) {
+            sStereoScreen = value != 0.0f;
+        } else if (!strcmp(key, "stereo_depth") && value >= 0.25f && value <= 3.0f) {
+            sStereoDepth = value;
+        } else if (!strcmp(key, "stereo_far") && value >= 0.5f && value <= 1.0f) {
+            sStereoFar = value;
+        } else if (!strcmp(key, "stereo_resolution") && value >= 0.5f && value <= 1.0f) {
+            sStereoSize = value;
         } else if (!strcmp(key, "turn_with_camera")) {
             sRigParams.turnWithCamera = value != 0.0f;
         } else {
@@ -839,7 +951,10 @@ void setDioramaDistance(float metres) { sRigParams.anchor.z = -metres; }
 float screenDistance() { return sScreenDistance; }
 const std::string& gamePath() { return sGamePath; }
 void setScreenDistance(float metres) { sScreenDistance = metres; }
-void setAimLength(float metres) { sAimLength = metres; }
+void setAimLength(float metres) {
+    sAimLength = metres;
+    sAimOnPanel = true;
+}
 void drawOverlayQuad(GLuint texture, const xm::Mat4& mvp, float alpha) { drawQuad(texture, mvp, false, alpha); }
 float swapchainScale() { return fminf(sResolution, 1.25f); }
 float refreshRate() { return sRefreshRate; }
@@ -852,6 +967,10 @@ bool sharpening() { return sSharpen; }
 void setSharpening(bool on) { sSharpen = on; }
 bool giantScreen() { return sGiantScreen; }
 void setGiantScreen(bool on) { sGiantScreen = on; }
+bool stereoScreen() { return sStereoScreen; }
+void setStereoScreen(bool on) { sStereoScreen = on; }
+float stereoDepth() { return sStereoDepth; }
+void setStereoDepth(float depth) { sStereoDepth = fminf(3.0f, fmaxf(0.25f, depth)); }
 bool snapTurn(int dir) {
     if (!sVrMode || !sRig.valid || sRigParams.turnWithCamera || dir == 0) return false;
     sRig.pendingTurn += (dir > 0 ? 1.0f : -1.0f) * 0.78539816f;
@@ -1247,6 +1366,7 @@ void init() {
     sLayerProgram = link(kQuadVs, kLayerFs);
     sLayerTex = glGetUniformLocation(sLayerProgram, "uTex");
     sLayerMvp = glGetUniformLocation(sLayerProgram, "uMvp");
+    sLayerUvScale = glGetUniformLocation(sLayerProgram, "uUvScale");
     sLaserProgram = link(kLaserVs, kLaserFs);
     sLaserMvp = glGetUniformLocation(sLaserProgram, "uMvp");
     sLaserCorners = glGetUniformLocation(sLaserProgram, "uCorners");
@@ -1344,6 +1464,15 @@ void beginFrame(const FrameInfo& frame) {
     } else {
         std::lock_guard<std::mutex> lock(sCullLock);
         sCullValid = false;
+    }
+    // The giant screen's gameplay (any frame of it with a 3D camera) as a
+    // stereo pair.
+    sStereoFrame = sStereoScreen && sGiantScreen && !sVrMode && r.hasFrame() && r.camera().valid;
+    if (sStereoFrame) {
+        for (gpu::EfbTarget& t : sFlatPair) {
+            ensureTarget(t, (int)lroundf(sFlat.width * sStereoSize), (int)lroundf(sFlat.height * sStereoSize));
+        }
+        updateStereo(frame, r.camera(), dt);
     }
     // The eye targets at the current render scale (the swapchain images are
     // at swapchainScale()).
@@ -1483,9 +1612,29 @@ Extent renderEye(int eye, const FrameInfo& frame, GLuint fbo, int width, int hei
             drawPanel(sHud, viewProj * panelModel(kHudCenter, kHudWidth, (float)sHud.width / sHud.height), false);
         }
     } else {
-        if (eye == 0 && r.hasFrame()) {
+        if (r.hasFrame() && sStereoFrame) {
+            // The eye's picture of the stereo pair.  The pair goes to the
+            // screen's layers once both are drawn (the two eyes may be
+            // rendered a display refresh apart), so they never show
+            // different game frames.
+            gpu::EyeView ev;
+            ev.index = eye;
+            ev.flatStereo = true;
+            ev.stereo[0] = eye == 0 ? sStereoShift : -sStereoShift;
+            ev.stereo[1] = sConvergence;
+            ev.stereo[2] = kStereoNear / sStereoFar;
+            ev.stereo[3] = eye == 0 ? sStereoHudShift : -sStereoHudShift;
+            ev.pointer[0] = ev.stereo[0] * sPointerParallax;
+            ev.pointer[1] = sPointerOnHud ? 1.0f : 0.0f;
+            r.render(sFlatPair[eye], &ev, nullptr, gpu::HudMode::Inline);
+            if (eye == 1) {
+                sFlatFresh = sFlatRightFresh = true;
+                sStereoShown = true;
+            }
+        } else if (eye == 0 && r.hasFrame()) {
             r.render(sFlat, nullptr, nullptr, gpu::HudMode::Inline);
             sFlatFresh = true;
+            sStereoShown = false;
         }
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glViewport(0, 0, width, height);
@@ -1496,7 +1645,8 @@ Extent renderEye(int eye, const FrameInfo& frame, GLuint fbo, int width, int hei
         glClearColor(0.004f, 0.004f, 0.012f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         if (r.hasFrame() && !sUiLayers) {
-            drawPanel(sFlat, viewProj * panelModel(screenCenter(), screenWidth(), (float)sFlat.width / sFlat.height), true);
+            drawPanel(sStereoFrame ? sFlatPair[eye] : sFlat, viewProj * panelModel(screenCenter(), screenWidth(), (float)sFlat.width / sFlat.height),
+                      true);
         }
     }
     if (!sUiLayers) {
@@ -1678,6 +1828,7 @@ void pointerLost() {
 bool pointerFromRay(xm::Vec3 origin, xm::Vec3 dir, float* x, float* y) {
     bool hit = pointerFromRayImpl(origin, dir, x, y);
     sAimValid = true;
+    sAimOnPanel = false;  // until setAimLength says so
     sAimOrigin = origin;
     sAimDir = xm::normalize(dir);
     {
@@ -1745,7 +1896,7 @@ void uiLayerSize(int which, int* width, int* height) {
     if (which == kHudLayer) {
         *width = sHud.width;
         *height = sHud.height;
-    } else if (which == kScreenLayer) {
+    } else if (which == kScreenLayer || which == kScreenRightLayer) {
         *width = sFlat.width;
         *height = sFlat.height;
     } else if (which == kSetupLayer) {
@@ -1767,11 +1918,18 @@ UiLayer uiLayer(int which) {
         l.height = kHudWidth * (float)sHud.height / (float)sHud.width;
         return l;
     }
-    if (which == kScreenLayer) {
+    if (which == kScreenLayer || which == kScreenRightLayer) {
         // The virtual screen (menus, cutscenes, the giant screen's gameplay):
         // sampled once by the compositor, and steady at the display's rate.
-        l.visible = sUiLayers && !sVrMode && gpu::renderer().hasFrame();
-        l.changed = sFlatFresh;
+        // A stereo pair goes out as a layer for each eye.
+        bool right = which == kScreenRightLayer;
+        l.visible = sUiLayers && !sVrMode && gpu::renderer().hasFrame() && (!right || sStereoShown);
+        l.changed = right ? sFlatRightFresh : sFlatFresh;
+        l.eye = !sStereoShown ? kBothEyes : right ? kRightEye : kLeftEye;
+        if (sStereoShown) {
+            l.imageWidth = sFlatPair[right].width;
+            l.imageHeight = sFlatPair[right].height;
+        }
         l.position = screenCenter();
         l.width = screenWidth();
         l.height = screenWidth() * (float)sFlat.height / (float)sFlat.width;
@@ -1786,19 +1944,24 @@ void drawUiLayer(int which, GLuint fbo) {
     int w, h;
     uiLayerSize(which, &w, &h);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glViewport(0, 0, w, h);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+    // The picture fills the part of the image the layer shows.
+    UiLayer part = uiLayer(which);
+    glViewport(0, 0, part.imageWidth ? part.imageWidth : w, part.imageHeight ? part.imageHeight : h);
     if (which == kHudLayer) {
         drawQuad(sHud.color, xm::scale(2.0f), false, 1.0f);  // the unit quad over the whole image
         sHudFresh = false;
     } else if (which == kScreenLayer) {
-        drawQuad(sFlat.color, xm::scale(2.0f), true, 1.0f);
+        drawQuad(sStereoShown ? sFlatPair[0].color : sFlat.color, xm::scale(2.0f), true, 1.0f);
         sFlatFresh = false;
+    } else if (which == kScreenRightLayer) {
+        drawQuad(sFlatPair[1].color, xm::scale(2.0f), true, 1.0f);
+        sFlatRightFresh = false;
     } else if (which == kSetupLayer) {
         setupDrawLayer();
     } else {
@@ -1816,6 +1979,9 @@ void compositeUiLayer(int which, GLuint texture, const xm::Mat4& viewProj) {
     xm::Mat4 mvp = viewProj * xm::poseMatrix(l.orientation, l.position) * size;
     glUseProgram(sLayerProgram);
     glUniformMatrix4fv(sLayerMvp, 1, GL_FALSE, mvp.m);
+    int w, h;
+    uiLayerSize(which, &w, &h);
+    glUniform2f(sLayerUvScale, l.imageWidth ? (float)l.imageWidth / w : 1.0f, l.imageHeight ? (float)l.imageHeight / h : 1.0f);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture);
     glBindSampler(0, 0);

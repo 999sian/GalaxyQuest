@@ -33,6 +33,64 @@ Technical notes for people working on the port. For playing, see the
   are 16:9 (2048x1152 and 1600x900). The screen's layer is mipmapped and
   asks the compositor for supersampling, since a distant screen shows
   fewer display pixels than it has texels.
+- Stereoscopic 3D on the giant screen (`stereo_screen`, a switch on the
+  settings panel): frames with a 3D camera are replayed twice into two
+  screen targets, one for each eye, and go out as two quad layers with
+  `XR_EYE_VISIBILITY_LEFT` and `_RIGHT` (both are published together once
+  the right one is drawn, so the eyes never show different game frames).
+  The Quest's compositor shows the two as one stereo quad with a swapchain
+  for each eye. The two targets are `stereo_resolution` (0.8) times the
+  single picture's size, 1638x922, drawn into the lower left part of the
+  2048x1152 layer images and shown through the layers' image rectangles, so
+  the compositor does the only scaling. Measured in the headset (Good Egg,
+  app GPU time a frame): one picture 6.3 to 7.0 ms in play and 8.0 ms in the
+  galaxy's opening shots; two at full size 10.6 and 13.2 ms (57 frames a
+  second in the opening); two at 0.8 8.6 to 9.0 and 9.7 ms, 60 frames a
+  second throughout.
+  The replay keeps the game's camera, projection and viewports; the vertex
+  shader shifts the 3D draws sideways in clip space by
+  `a * min(C - w, m * w)`, with `w` the depth in front of the camera, which
+  is the picture from a camera moved sideways with its frustum sheared to
+  meet the other one's at depth `C`, the convergence. In distances between
+  the player's eyes (the distance between the two eye poses the runtime
+  reports), the two pictures then draw a point
+  `stereo_far - stereo_depth * d / w` apart, `d` being Mario's depth:
+  the farthest things `stereo_far` (0.95) behind the screen, the most the
+  eyes can take, and Mario `stereo_depth` (1.75, "3D depth" on the settings
+  panel) in front of that. So `a` is 0.95 eye distances and `C` is
+  `d * stereo_depth / stereo_far`, following the camera with a 0.4 s
+  half-life and jumping on cuts. A screen 4.5 m away leaves under a degree
+  between itself and infinity, so a scene kept wholly behind it (the first
+  version: 0.8 behind, Mario 0.52 before that) had hardly any depth; now
+  Mario stands two metres in front of the screen and the foreground
+  comes further out. Nothing is drawn more than 2.5 eye distances apart in
+  front of the screen (`m`), 1.3 m from the player. The draws between the
+  HUD markers are shifted as a whole to float in front of the scene they
+  cover (`2 * stereo_depth - stereo_far` eye distances, at most the 2.5:
+  1.3 m away), and widened by the shift so a fade still covers the picture;
+  their scissor boxes move with them. The pointer's cursor (the draws
+  between the pointer markers, inside the HUD's) is the exception while it
+  points into the scene: floating with the HUD it stopped short of what it
+  pointed at, and the eyes on the target saw it double. It gets the shift of
+  the point under it instead, whose depth the game reports each frame
+  (`port_vr_pointer_depth`: its own ray from the camera through the cursor
+  against the map's collision, the far plane where it hits nothing), so it
+  lies on the surface it points at. Only the map counts: over an enemy or
+  a character it lies on the ground behind them.
+  Skies are drawn at the far limit whatever their
+  model's size. Other orthographic draws (post effects) are not shifted,
+  screen-space texgens (water, heat haze) follow the
+  shifted position, and each picture keeps its own EFB copies, as the
+  diorama's eyes do.
+- The app's space (screen, diorama, panels, controllers) is the runtime's
+  LOCAL space moved to the head and turned to where it faces (about the
+  vertical only) on the first tracked frame of each session, at launch and
+  when the headset is put back on, and again when the player recentres
+  (`XrEventDataReferenceSpaceChangePending` for LOCAL) or the head's pose
+  jumps within a session's first five seconds (tracking settling after a
+  wake-up). LOCAL alone can be stale when the game starts: launched right
+  after the headset woke up, its origin was 2.15 m from the head, and the
+  screen came up beside or behind the player.
 - The HUD (coins, star bits, life meter, menus) sits on a transparent panel
   1 m in front of you.
 - Menus, the title and file select, and cutscenes appear on a large virtual
@@ -130,6 +188,13 @@ In the diorama:
 - The game's letterbox bars (`CinemaFrame`, shown through a galaxy's whole
   opening) are left out of the diorama; the frame closing to black and
   opening from it becomes a fade of the whole view (`port_vr_wipe`).
+- A comet mission's screen filter (`GalaxyCometScreenFilter`, a tint over
+  the whole TV picture, darkest in the middle of its top) is left out of
+  the diorama too: on the HUD panel it was a black patch in the middle of
+  the view. On the virtual screen it is drawn as on a TV.
+- On the giant screen no laser is drawn from the controller (the game's
+  cursor is on the screen); it shows only while the ray is on one of the VR
+  layer's own panels (`vr::setAimLength`) or the setup screen is up.
 - When level geometry hides Mario (a collision ray from the headset to him
   is blocked), the geometry between your eyes and him is dithered away: a
   cone from each eye to Mario, plus a small sphere around the eye
@@ -383,7 +448,8 @@ screen after the strap warning, unable to read them), and
 `PETARI_VRSHOT_MS=<ms>` saves both eyes of the headset's picture every
 that many ms to `vrshots/` (the headset's own screenshots don't show the
 app), with SpaceWarp the left eye's motion vectors as `_mv.png` next to
-each. With the proximity sensor overridden (`metavr device proximity
+each, and the virtual screen's layers as `_screen.png` (`_screenL.png` and
+`_screenR.png` for a stereo pair). With the proximity sensor overridden (`metavr device proximity
 --disable`) a session runs without anyone wearing the headset, as long as
 the headset is unlocked. Delete the file afterwards.
 

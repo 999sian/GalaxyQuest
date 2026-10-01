@@ -55,6 +55,26 @@ struct EyeView {
     // camera (view space origin) are lit from here instead.
     float eyePos[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     int index = 0;  // 0 = left, 1 = right: each eye keeps its own EFB copies
+    // One picture of a stereo pair of the flat view instead (view, proj and
+    // the cutaway are not used): the frame is replayed with the game's own
+    // camera, viewports and projection, and the 3D draws a VR eye would take
+    // are shifted sideways in clip space by
+    //   stereo[0] * min(stereo[1] - w, stereo[2] * w)
+    // with w the depth in front of the camera (game units).  stereo[0]: the
+    // shift of the farthest things, in half screen widths, positive for the
+    // left picture and negative for the right one; stereo[1]: the depth
+    // that lands where it does without the shift (the screen's own depth to
+    // the two eyes); stereo[2]: how many times farther than the farthest
+    // things the nearest ones may shift the other way; stereo[3]: the shift
+    // of the draws between the HUD markers, in half screen widths (positive
+    // for the left picture: the HUD floats before the screen).
+    // pointer[0]: the shift of the pointer's 2D cursor (the draws between
+    // the pointer markers) while it points into the scene: that of the point
+    // under it; pointer[1]: nonzero while it points at menus instead, and
+    // goes with the HUD.
+    bool flatStereo = false;
+    float stereo[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float pointer[2] = {0.0f, 0.0f};
     // SpaceWarp: with a target here, draws between the player markers leave
     // 1 in the stencil buffer where they write depth (other draws 0), and at
     // the scene depth marker the depth and stencil are copied into the
@@ -84,7 +104,8 @@ public:
     uint64_t frameNumber() const;
 
     // Replays the current frame into `efb`.  With `eye`, the perspective 3D
-    // draws after the frame's camera use the VR camera.
+    // draws after the frame's camera use the VR camera (or, with
+    // eye->flatStereo, the game's camera shifted for a stereo pair).
     void render(EfbTarget& efb, const EyeView* eye, EfbTarget* hud, HudMode hudMode = HudMode::Inline);
     // Whether the last render() reached the scene depth marker and filled
     // eye->depthSnapshot.
