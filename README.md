@@ -80,68 +80,185 @@ story and saves all come from the game's own code and your own game files.
 
 ## What you need
 
-- A **Meta Quest 3** (a Quest 3S should work too but is untested), with
-  [developer mode](https://developers.meta.com/horizon/documentation/android-apps/enable-developer-mode)
-  turned on so you can install apps from outside the store.
+- A **Meta Quest 3** (a Quest 3S should work too but is untested) with
+  about 7 GB free, and a **USB-C data cable** to connect it to the computer
+  (a charge-only cable does not work).
 - **Your Super Mario Galaxy disc**, dumped as an ISO, RVZ or WBFS image (for
   example with [CleanRip](https://wiibrew.org/wiki/CleanRip) on a Wii), or
   already extracted. Tested with the European disc (RMGP01); the other
   regions have not been tried yet.
-- A **computer** (Windows, macOS or Linux) with
-  [Python 3.8 or newer](https://www.python.org/downloads/),
-  [adb](https://developer.android.com/tools/releases/platform-tools) (the
-  Android platform tools), and [Dolphin](https://dolphin-emu.org/) to
-  extract the disc. About 10 GB of free space, and 7 GB on the headset.
+- A **computer** (Windows, macOS or Linux) with about 10 GB free, and three
+  free programs on it:
+  - [Python 3.8 or newer](https://www.python.org/downloads/), which runs
+    the converter;
+  - [adb](https://developer.android.com/tools/releases/platform-tools), the
+    Android *platform-tools*, which talks to the headset (a zip to unpack,
+    nothing to install);
+  - [Dolphin](https://dolphin-emu.org/), which extracts the disc.
+- The two downloads of the
+  [latest release](https://github.com/bigmak94/GalaxyQuest/releases/latest):
+  - [`GalaxyQuest.apk`](https://github.com/bigmak94/GalaxyQuest/releases/latest/download/GalaxyQuest.apk),
+    the app;
+  - [`GalaxyQuest-converter.zip`](https://github.com/bigmak94/GalaxyQuest/releases/latest/download/GalaxyQuest-converter.zip),
+    the Python scripts (`.py` files) that convert your game files and copy
+    them to the headset.
+
+> **You do not need to download or clone this repository.** Every Python
+> file the steps below use is in `GalaxyQuest-converter.zip`, on the release
+> page of this repository. (They are the ones under `tools/` here: if you
+> did clone the repository, run the same commands from its root.)
 
 ## Installing
 
-1. **Download** `GalaxyQuest.apk` (the app) and `GalaxyQuest-converter.zip`
-   (the scripts that convert your game files, a few Python files) from the
-   [latest release](https://github.com/bigmak94/GalaxyQuest/releases/latest),
-   and unzip the converter. The commands of steps 4 and 5 are run from its
-   folder, `GalaxyQuest-converter`. There is no need to download the source;
-   if you cloned this repository, the same scripts are in it, and the
-   commands run from its root.
+In short: turn on developer mode, install the app, extract your disc,
+convert it, copy the result to the headset. Allow half an hour, most of it
+waiting for files to copy.
 
-2. **Install it** on the headset, connected to the computer over USB:
+> **Which Python command?** The steps below write `python`. Type what your
+> system uses instead:
+>
+> - **Windows: `py`** (for example `py tools/cook/cook.py ...`). `python`
+>   often does nothing there, or opens the Microsoft Store.
+> - **macOS and Linux: `python3`**.
 
-   ```
-   adb install --no-incremental -r GalaxyQuest.apk
-   ```
+### 1. Turn on developer mode on the headset
 
-   Keep `--no-incremental`: with an incremental install (the default of
-   recent adb versions) the app does not start.
+Developer mode lets the headset run apps that do not come from the store.
+It is turned on from your phone, once:
 
-3. **Extract your disc** with Dolphin: in its game list, right-click the
-   game, *Properties*, *Filesystem* tab, right-click the disc at the top,
-   *Extract Entire Disc...*, and pick an empty folder. (Or on the command
-   line: `DolphinTool extract -i "Super Mario Galaxy.rvz" -o extracted`.)
+1. You need a free Meta developer account, made with the Meta account
+   your headset uses (Meta asks you to verify the account). Meta's page
+   linked below shows how.
+2. Open the **Meta Horizon** app on your phone, tap the headset icon, tap
+   your headset at the top, then **Headset Settings**, **Developer Mode**,
+   and switch it on.
+3. Connect the headset to the computer with the USB cable and put it on.
+   When it asks to **allow USB debugging**, choose *Always allow from this
+   computer*.
 
-4. **Convert the game files** for the port (a few minutes):
+Meta's own page for this, with pictures:
+[Enable developer mode](https://developers.meta.com/horizon/documentation/android-apps/enable-developer-mode).
 
-   ```
-   python tools/cook/cook.py extracted cooked --with-movies
-   ```
+### 2. Put everything in one folder
 
-   `extracted` is the folder from step 3 (the one containing `DATA`, with
-   its `sys` and `files` folders: the converter also takes a few pieces of
-   data from the game's program, `sys/main.dol`), and `cooked` is where
-   the converted files go (3.3 GB). Without
-   `--with-movies` the prologue and ending movies are left out (2.3 GB
-   less) and play as a black screen.
+1. Unzip `GalaxyQuest-converter.zip`. You get a folder,
+   `GalaxyQuest-converter`, with a `tools` folder and a `README.txt` in it.
+   Everything below happens in this folder.
+2. Move `GalaxyQuest.apk` into it.
+3. Unzip the platform-tools download (adb) into it as well, so that it
+   holds a `platform-tools` folder.
 
-5. **Copy them to the headset**:
+### 3. Open a terminal in that folder
 
-   ```
-   python tools/push_data.py cooked
-   ```
+- **Windows:** open the `GalaxyQuest-converter` folder in File Explorer,
+  click in the address bar, type `cmd` and press Enter. Then tell this
+  window where adb is:
 
-   Without adb, you can also copy the `cooked` folder with the computer's
-   file manager, the headset connected over USB (for example into
-   *Download*), and pick it on the app's setup screen (below).
+  ```
+  set PATH=%PATH%;%CD%\platform-tools
+  ```
 
-6. **Play**: put the headset on and start **GalaxyQuest** from
-   *Library*, *Unknown Sources*.
+- **macOS and Linux:** open a terminal, `cd` to the folder, then:
+
+  ```
+  export PATH="$PATH:$PWD/platform-tools"
+  ```
+
+Check that both tools answer (`py` on Windows, `python3` on macOS and
+Linux):
+
+```
+python --version
+adb devices
+```
+
+The first must print Python 3.8 or newer. The second must list one device
+with the word `device` next to it. `unauthorized` means the USB debugging
+question is waiting in the headset (step 1); an empty list means the cable
+carries no data or developer mode is off.
+
+### 4. Install the app
+
+```
+adb install --no-incremental -r GalaxyQuest.apk
+```
+
+It ends with `Success`. Keep `--no-incremental`: with an incremental
+install (the default of recent adb versions) the app does not start.
+
+### 5. Extract your disc with Dolphin
+
+In Dolphin's game list, right-click the game, *Properties*, *Filesystem*
+tab, right-click the disc at the top of the list, *Extract Entire Disc...*,
+and choose a new, empty folder named `extracted` inside
+`GalaxyQuest-converter`. When it is done, `extracted` holds a `DATA` folder
+with `sys` and `files` in it.
+
+(Or on the command line:
+`DolphinTool extract -i "Super Mario Galaxy.rvz" -o extracted`.)
+
+### 6. Convert the game files
+
+```
+python tools/cook/cook.py extracted cooked --with-movies
+```
+
+(On Windows: `py tools/cook/cook.py extracted cooked --with-movies`.)
+
+This reads `extracted` and writes the converted game into a new `cooked`
+folder (3.3 GB), in a few minutes at most. When it is done it prints
+`cooked ... disc files in ...s`, a table of file types and a few lines
+starting with `note`: those are normal. The converter also takes a few pieces of data
+from the game's program (`sys/main.dol`), which is why it wants the whole
+extracted disc.
+
+- Without `--with-movies` the prologue and ending movies are left out
+  (2.3 GB less) and play as a black screen.
+- If your extracted disc is somewhere else, give its path instead of
+  `extracted`, in quotes if it has spaces:
+  `python tools/cook/cook.py "D:\Games\SMG extracted" cooked --with-movies`.
+
+### 7. Copy the game files to the headset
+
+```
+python tools/push_data.py cooked
+```
+
+(On Windows: `py tools/push_data.py cooked`.)
+
+It packs the `cooked` folder, copies it over USB and unpacks it on the
+headset: several minutes, and it needs about 3.3 GB of free space on the
+computer meanwhile. It ends with `done: the game files are in ...`. Leave
+the headset connected until then.
+
+- `adb not found`: the terminal does not know where adb is. Run the `set
+  PATH` (or `export PATH`) line of step 3 again in this window.
+- `no headset found`: see the `adb devices` check of step 3.
+- Without adb, you can copy the `cooked` folder with the computer's file
+  manager instead, the headset connected over USB (for example into
+  *Download*), and pick it on the app's setup screen (below).
+
+### 8. Play
+
+Put the headset on and start **GalaxyQuest** from *Library*, *Unknown
+Sources* (apps you install yourself are listed there, not in the main
+grid). The game starts on a giant screen in front of you; X or the Menu
+button opens the pause menu, with the VR settings beside it.
+
+### If something goes wrong
+
+- **`python` is not recognized, or opens the Microsoft Store** (Windows):
+  use `py` instead.
+- **`adb` is not recognized**: run the `set PATH` line of step 3 in this
+  terminal window; it is forgotten when the window closes.
+- **The app does not start after installing it**: it was installed without
+  `--no-incremental`. Install it again with the command
+  of step 4.
+- **The app shows a setup screen instead of the game**: it found no game
+  files. Run step 7, or pick the folder you copied on that screen (see
+  below).
+- **A folder shows as *Not converted* or *Convert again*** on the setup
+  screen: run step 6 with the current converter, then step 7.
 
 ### Where the game files go
 

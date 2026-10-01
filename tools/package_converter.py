@@ -32,6 +32,11 @@ These scripts turn your own extracted Super Mario Galaxy disc into the files
 the GalaxyQuest app reads, and copy them to the headset.  They need Python
 3.8 or newer and nothing else.
 
+The commands below write "python".  On Windows type "py" instead (for
+example: py tools/cook/cook.py extracted cooked --with-movies); on macOS
+and Linux, "python3".  Run them in a terminal opened in this folder (on
+Windows: click in File Explorer's address bar, type cmd, press Enter).
+
 1. Extract your disc with Dolphin: right-click the game, Properties,
    Filesystem tab, right-click the disc at the top, Extract Entire Disc...,
    into an empty folder (here "extracted").
@@ -47,6 +52,12 @@ the GalaxyQuest app reads, and copy them to the headset.  They need Python
    platform tools) installed and GalaxyQuest.apk already on the headset:
 
        python tools/push_data.py cooked
+
+   If it says "adb not found", tell the terminal where adb is first.  With
+   the platform-tools unzipped into this folder, on Windows:
+       set PATH=%PATH%;%CD%\\platform-tools
+   and on macOS and Linux:
+       export PATH="$PATH:$PWD/platform-tools"
 
    Without adb, copy the "cooked" folder to the headset with the computer's
    file manager (for example into Download) and pick it on the app's setup
