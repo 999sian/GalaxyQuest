@@ -145,8 +145,22 @@ Meta's own page for this, with pictures:
    `GalaxyQuest-converter`, with a `tools` folder and a `README.txt` in it.
    Everything below happens in this folder.
 2. Move `GalaxyQuest.apk` into it.
-3. Unzip the platform-tools download (adb) into it as well, so that it
-   holds a `platform-tools` folder.
+3. Get **adb**, the program that talks to the headset. It is part of
+   Google's *SDK Platform-Tools*, a free zip of about 10 MB with nothing to
+   install. Download the one for your computer:
+   - [Windows](https://dl.google.com/android/repository/platform-tools-latest-windows.zip)
+   - [macOS](https://dl.google.com/android/repository/platform-tools-latest-darwin.zip)
+   - [Linux](https://dl.google.com/android/repository/platform-tools-latest-linux.zip)
+
+   (These are the download links of Google's
+   [SDK Platform-Tools page](https://developer.android.com/tools/releases/platform-tools).)
+
+   The zip holds a single folder named `platform-tools`. Open the zip and
+   drag that folder into `GalaxyQuest-converter`. You should end up with
+   `GalaxyQuest-converter/platform-tools/adb` (`adb.exe` on Windows). On
+   Windows, *Extract All* puts the `platform-tools` folder inside another
+   one named `platform-tools-latest-windows`: move it out of there into
+   `GalaxyQuest-converter`.
 
 ### 3. Open a terminal in that folder
 
