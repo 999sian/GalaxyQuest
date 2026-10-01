@@ -263,3 +263,16 @@ Thanks as well to:
 Super Mario Galaxy, Mario and their logos are trademarks of Nintendo.
 GalaxyQuest is an unofficial fan project, not affiliated with or
 endorsed by Nintendo, and it includes no Nintendo game data.
+
+## License
+
+GalaxyQuest is open source and free for everyone: its code, tools and
+documentation are released into the public domain under
+[The Unlicense](LICENSE). Copy them, change them, use them, share them or
+sell them as you please, for any purpose, without asking anyone.
+
+The decompilation in `decomp/` is the Petari team's work, dedicated to the
+public domain under CC0 1.0 ([decomp/LICENSE-Petari.txt](decomp/LICENSE-Petari.txt));
+the port's changes to it are under the Unlicense like the rest. The few
+third-party parts keep their own licenses: see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
