@@ -4,7 +4,8 @@
 // The DSP side implements the JAudio microcode's mailbox protocol:
 //   boot            -> mails 0xDCD10000, <any>      (DspHandShake)
 //   command packet  -> [count][word0..]             (DSPSendCommands2)
-//   0x82 syncFrame  -> mixes N sub-frames, then one 0xDCD10004,0xF355FF00 pair per sub-frame
+//   0x82 syncFrame  -> N sub-frames to render, each when the game releases the voices
+//   release halt    -> with the last voices released: one sub-frame mixed, then 0xDCD10004,0xF355FF00
 //   0x81/0x8E etc.  -> 0xDCD10004, 0xF355<word0 >> 16> (DspFinishWork)
 // Mixing is delegated to port_dsp_mix_frame (silence until the mixer lands).
 #include <stdint.h>
@@ -63,24 +64,45 @@ extern "C" void __attribute__((weak)) port_dsp_mix_frame(u32 subFrames, s16* out
     memset(outR, 0, subFrames * 80 * sizeof(s16));
 }
 
+// The sync frame being rendered.  As on the console it goes one sub-frame at
+// a time: the game updates the voices (JASDSPChannel::updateAll), releasing
+// them to the DSP sixteen at a time; with the last sixteen released the DSP
+// renders the sub-frame's 80 samples and reports with a mail, on which the
+// game updates the voices for the next one.  The game so follows each voice
+// 80 samples at a time, and JASAramStream counts on it: it sets up a stream's
+// loop (or its end) once the voice is within 400 samples of it, and takes a
+// voice found beyond it for a fatal error that silences every stream until
+// the game is restarted.  Rendered a whole frame at once, a voice moved 560
+// samples between two looks and jumped that window on about one pass in
+// four: the music of the file select screen stopped for good after 55 s.
+static struct {
+    u32 subFrames = 0;
+    u32 done = 0;
+    s16* outL = nullptr;
+    s16* outR = nullptr;
+} sFrame;
+
 static void executePacket() {
     const std::vector<u32>& p = sPacket;
     u32 w0 = p.empty() ? 0 : p[0];
     u32 cmd = w0 >> 24;
     switch (cmd) {
-    case 0x82: {  // sync frame: mix `subFrames` sub-frames of 80 samples
-        u32 subFrames = (w0 >> 16) & 0xFF;
+    case 0x82:  // sync frame: `subFrames` sub-frames of 80 samples to render
+        sFrame.subFrames = (w0 >> 16) & 0xFF;
+        sFrame.done = 0;
         sMixerLevel = (u16)(w0 & 0xFFFF);
-        s16* outL = (s16*)(uintptr_t)(p.size() > 1 ? p[1] : 0);
-        s16* outR = (s16*)(uintptr_t)(p.size() > 2 ? p[2] : 0);
-        if (outL && outR && subFrames) {
-            port_dsp_mix_frame(subFrames, outL, outR, sMixerLevel);
-        }
-        for (u32 i = 0; i < subFrames; i++) {
+        sFrame.outL = (s16*)(uintptr_t)(p.size() > 1 ? p[1] : 0);
+        sFrame.outR = (s16*)(uintptr_t)(p.size() > 2 ? p[2] : 0);
+        break;
+    case 0x00:  // release halt: voices 0 .. 16 * (group + 1) - 1 are ready for the sub-frame
+        if (((w0 >> 16) & 0xFF) == 3 && sFrame.done < sFrame.subFrames) {
+            if (sFrame.outL && sFrame.outR) {
+                port_dsp_mix_frame(1, sFrame.outL + sFrame.done * 80, sFrame.outR + sFrame.done * 80, sMixerLevel);
+            }
+            sFrame.done++;
             queueMail(0xDCD10004, 0xF355FF00);
         }
         break;
-    }
     case 0x8E:  // set VARAM base (alt-ARAM start in MEM2)
         sVaramBase = p.size() > 1 ? p[1] : 0;
         queueMail(0xDCD10004, 0xF3550000 | (w0 >> 16));
@@ -92,7 +114,7 @@ static void executePacket() {
         queueMail(0xDCD10004, 0xF3550000 | (w0 >> 16));
         break;
     default:
-        // Release-halt and other control words need no reply.
+        // Other control words need no reply.
         break;
     }
     port_irq_raise(PORT_IRQ_DSP);
