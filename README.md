@@ -95,10 +95,13 @@ story and saves all come from the game's own code and your own game files.
 
 ## Installing
 
-1. **Download the app**: `GalaxyQuest.apk` from the
-   [latest release](https://github.com/bigmak94/GalaxyQuest/releases/latest).
-   Download this repository too (the green *Code* button, then *Download
-   ZIP*, or `git clone`): the conversion tools are in it.
+1. **Download** `GalaxyQuest.apk` (the app) and `GalaxyQuest-converter.zip`
+   (the scripts that convert your game files, a few Python files) from the
+   [latest release](https://github.com/bigmak94/GalaxyQuest/releases/latest),
+   and unzip the converter. The commands of steps 4 and 5 are run from its
+   folder, `GalaxyQuest-converter`. There is no need to download the source;
+   if you cloned this repository, the same scripts are in it, and the
+   commands run from its root.
 
 2. **Install it** on the headset, connected to the computer over USB:
 
@@ -203,6 +206,10 @@ export ANDROID_HOME=/path/to/Android/Sdk           # likewise
 tools/package_apk.sh
 adb install --no-incremental -r out/GalaxyQuest.apk
 ```
+
+`python tools/package_converter.py` makes the release's other download,
+`out/GalaxyQuest-converter.zip`: the converter and `push_data.py` with the
+modules they import.
 
 The first build downloads the Khronos OpenXR loader from Maven Central.
 `tools/env.sh` lists every variable the scripts read (`JAVA_HOME`, `CMAKE`,
