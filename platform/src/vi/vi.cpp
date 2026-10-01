@@ -170,7 +170,11 @@ BOOL VIEnableDimming(BOOL enable) {
     (void)enable;
     return FALSE;
 }
-u32 VIGetDimmingCount(void) { return 0; }
+// Retraces left before the console dims the picture against burn-in (five
+// minutes without input).  Never 0 here: at 0 the game takes the screen saver
+// to be on and keeps the music at a third of its volume (AudSystem::
+// screenSaverProcess).
+u32 VIGetDimmingCount(void) { return 18000; }
 void VISetTrapFilter(VIBool) {}
 
 }  // extern "C"
