@@ -111,7 +111,10 @@ void TamakoroTutorial::requestEnd() {
 
 void TamakoroTutorial::control() {
 #ifdef TARGET_PC
-    port_input_use_tilt(100.0f);  // as SphereAccelSensorController
+    // Only the checks that the remote is raised read the tilt.
+    if (isNerve(GET_NERVE(TamakoroTutorial, HostTypeNrvWaitRaiseTalk)) || isNerve(GET_NERVE(TamakoroTutorial, HostTypeNrvWaitRaiseStable))) {
+        port_input_use_tilt(80.0f);  // as SphereAccelSensorController
+    }
 #endif
     MR::getCorePadAcceleration(&mPadAccel, WPAD_CHAN0);
     MR::normalizeOrZero(&mPadAccel);

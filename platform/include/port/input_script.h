@@ -2,10 +2,13 @@
 // launcher and the VR app: comma-separated "<t>[-<t1>]:<item>|<item>..."
 // entries (seconds since boot; a single time holds for 0.15 s).  Items: A B 1
 // 2 PLUS MINUS HOME Z C UP DOWN LEFT RIGHT, SPIN (remote shake), SX=<f>
-// SY=<f> (stick), PX=<f> PY=<f> (pointer).
+// SY=<f> (stick), PX=<f> PY=<f> (pointer), PITCH=<deg> ROLL=<deg> (the right
+// controller's tilt from level: pitched up, then rolled right; negative:
+// down, left).
 // Example: PETARI_INPUT="22:A,26:A,30-33:SY=1|A"
 #pragma once
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,8 +19,8 @@
 typedef struct PortInputEvent {
     int t0, t1;  // ms
     uint32_t buttons;
-    int spin, hasStick, hasPointer;
-    float sx, sy, px, py;
+    int spin, hasStick, hasPointer, hasTilt;
+    float sx, sy, px, py, pitch, roll;
 } PortInputEvent;
 
 static const struct {
@@ -54,6 +57,10 @@ static inline int portParseInputScript(const char* spec, PortInputEvent* out, in
                 e.hasPointer = 1, e.px = (float)atof(item + 3);
             } else if (!strncmp(item, "PY=", 3)) {
                 e.hasPointer = 1, e.py = (float)atof(item + 3);
+            } else if (!strncmp(item, "PITCH=", 6)) {
+                e.hasTilt = 1, e.pitch = (float)atof(item + 6);
+            } else if (!strncmp(item, "ROLL=", 5)) {
+                e.hasTilt = 1, e.roll = (float)atof(item + 5);
             } else if (!strcmp(item, "SPIN")) {
                 e.spin = 1;
             } else {
@@ -83,6 +90,14 @@ static inline int portApplyInputScript(const PortInputEvent* ev, int count, int 
         pad->buttons |= e->buttons;
         if (e->hasStick) pad->stickX = e->sx, pad->stickY = e->sy;
         if (e->hasPointer) pad->pointerValid = 1, pad->pointerX = e->px, pad->pointerY = e->py;
+        if (e->hasTilt) {
+            // Down in the controller's axes (x right, y up, z where it aims).
+            float p = e->pitch * 3.14159265f / 180.0f, r = e->roll * 3.14159265f / 180.0f;
+            pad->tilted = 1;
+            pad->downX = cosf(p) * sinf(r);
+            pad->downY = -cosf(p) * cosf(r);
+            pad->downZ = -sinf(p);
+        }
         if (e->spin) {
             // Alternating spikes, like the XR layer's shake.
             float s = ((ms - e->t0) / 16) & 1 ? 2.5f : -2.5f;

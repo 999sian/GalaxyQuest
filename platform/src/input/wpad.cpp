@@ -61,9 +61,26 @@ extern "C" void port_input_use_tilt(float neutralPitchDeg) {
     sTiltUsedAt.store(port_host_time_ns());
 }
 
-extern "C" int port_input_tilt_active(float* neutralPitchDeg) {
-    *neutralPitchDeg = sTiltNeutralPitch.load();
-    return port_host_time_ns() - sTiltUsedAt.load() < 500000000;  // 0.5 s
+// Gravity as the remote's accelerometer reads it, in g.  KPAD's axes: x left,
+// y out of the button face, z where the remote points; held level, (0, -1, 0)
+// (KPADReset).  The game turns these into its own (WPadAcceleration::update:
+// x = -acc.x, y = acc.z, z = -acc.y).  While the game steers by tilt the
+// remote is the right controller pitched up by the neutral angle, so holding
+// the controller level gives the grip the game asks for; otherwise the remote
+// is held level, and aiming the laser never moves it.
+static Vec remoteGravity(const PortPadState& s) {
+    Vec g = {0.0f, -1.0f, 0.0f};
+    if (port_host_time_ns() - sTiltUsedAt.load() >= 500000000) {  // 0.5 s
+        return g;
+    }
+    // A controller whose orientation is unknown counts as held level.
+    Vec down = s.tilted ? Vec{s.downX, s.downY, s.downZ} : Vec{0.0f, -1.0f, 0.0f};
+    float p = sTiltNeutralPitch.load() * (3.14159265f / 180.0f);
+    float c = __builtin_cosf(p), sn = __builtin_sinf(p);
+    g.x = -down.x;
+    g.y = down.y * c - down.z * sn;
+    g.z = down.z * c + down.y * sn;
+    return g;
 }
 
 static PortPadState snapshot(int chan) {
@@ -191,12 +208,16 @@ s32 KPADRead(s32 chan, KPADStatus samples[], u32 length) {
     k->release = sPrevHold[chan] & ~hold;
     sPrevHold[chan] = hold;
 
-    k->acc.x = s.accX;
-    k->acc.y = s.accY;
-    k->acc.z = s.accZ;
-    k->acc_value = __builtin_sqrtf(s.accX * s.accX + s.accY * s.accY + s.accZ * s.accZ);
-    k->acc_vertical.x = s.accY;
-    k->acc_vertical.y = s.accZ;
+    Vec g = remoteGravity(s);
+    k->acc.x = g.x + s.accX;
+    k->acc.y = g.y + s.accY;
+    k->acc.z = g.z + s.accZ;
+    k->acc_value = __builtin_sqrtf(k->acc.x * k->acc.x + k->acc.y * k->acc.y + k->acc.z * k->acc.z);
+    // The remote's pitch, as KPAD works it out (calc_acc_vertical, unsmoothed).
+    float side = __builtin_sqrtf(k->acc.x * k->acc.x + k->acc.y * k->acc.y);
+    float len = __builtin_sqrtf(side * side + k->acc.z * k->acc.z);
+    k->acc_vertical.x = len > 0.0f ? side / len : 1.0f;
+    k->acc_vertical.y = len > 0.0f ? -k->acc.z / len : 0.0f;
     k->pos.x = s.pointerX;
     k->pos.y = s.pointerY;
     k->horizon.x = 1.0f;
@@ -206,12 +227,14 @@ s32 KPADRead(s32 chan, KPADStatus samples[], u32 length) {
     k->dev_type = WPAD_DEV_FREESTYLE;
     k->wpad_err = WPAD_ERR_NONE;
     k->data_format = WPAD_FMT_FREESTYLE_ACC_DPD;
-    k->ex_status.fs.stick.x = s.stickX;
-    k->ex_status.fs.stick.y = s.stickY;
-    k->ex_status.fs.acc.x = s.nunAccX;
-    k->ex_status.fs.acc.y = s.nunAccY;
-    k->ex_status.fs.acc.z = s.nunAccZ;
-    k->ex_status.fs.acc_value = __builtin_sqrtf(s.nunAccX * s.nunAccX + s.nunAccY * s.nunAccY + s.nunAccZ * s.nunAccZ);
+    auto& fs = k->ex_status.fs;
+    fs.stick.x = s.stickX;
+    fs.stick.y = s.stickY;
+    // The Nunchuk is held level (same axes as the remote's).
+    fs.acc.x = s.nunAccX;
+    fs.acc.y = s.nunAccY - 1.0f;
+    fs.acc.z = s.nunAccZ;
+    fs.acc_value = __builtin_sqrtf(fs.acc.x * fs.acc.x + fs.acc.y * fs.acc.y + fs.acc.z * fs.acc.z);
     return 1;
 }
 

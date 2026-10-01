@@ -65,9 +65,10 @@ void port_perf_frame_work_done(void);
 void port_gx_camera(const float* camera);  // PORT_GX_CAMERA_WORDS words
 // Called where the game steers with the Wii remote's tilt (Star Ball, Ray
 // surfing).  While it keeps being called, the controller's orientation feeds
-// the accelerometer; otherwise the remote reads as held still, so ordinary
-// pointing never registers as a shake.  neutralPitchDeg: remote pitch (0 =
-// level, 90 = pointing up) that a level-held controller stands for.
+// the accelerometer; otherwise the remote reads as held level and still, so
+// ordinary pointing never registers as a shake.  neutralPitchDeg: remote
+// pitch (0 = level, 90 = pointing up) that a level-held controller stands
+// for (platform/src/input/wpad.cpp).
 void port_input_use_tilt(float neutralPitchDeg);
 #define PORT_GX_MARK_HUD_BEGIN 1
 #define PORT_GX_MARK_HUD_END 2

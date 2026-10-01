@@ -72,8 +72,6 @@ static void logMemory(double seconds) {
 static void padAt(const PortInputEvent* ev, int count, int ms, PortPadState* pad) {
     memset(pad, 0, sizeof(*pad));
     pad->connected = 1;
-    pad->accZ = -1.0f;
-    pad->nunAccZ = -1.0f;
     pad->pointerDist = 2.0f;
     portApplyInputScript(ev, count, ms, pad);
 }

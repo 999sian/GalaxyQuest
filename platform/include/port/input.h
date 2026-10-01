@@ -11,8 +11,16 @@ typedef struct PortPadState {
     int connected;         // a Wii remote + Nunchuk is present
     uint32_t buttons;      // WPAD_BUTTON_* bits (remote and Nunchuk C/Z)
     float stickX, stickY;  // Nunchuk stick, -1..1 (right / up positive)
-    float accX, accY, accZ;        // remote accelerometer in g (remote frame)
-    float nunAccX, nunAccY, nunAccZ;  // Nunchuk accelerometer in g
+    // Motion of the remote and the Nunchuk in g (shakes), 0 when held still.
+    // The emulation adds gravity (wpad.cpp).  KPAD axes: x left, y out of the
+    // button face, z where the remote points.
+    float accX, accY, accZ;
+    float nunAccX, nunAccY, nunAccZ;
+    // Which way is down from the right controller, when `tilted`: a unit
+    // vector in its axes (x right, y up, z where it aims).  The remote takes
+    // this tilt while the game steers by tilt (port_input_use_tilt).
+    int tilted;
+    float downX, downY, downZ;
     int pointerValid;      // pointer is on screen
     float pointerX, pointerY;  // -1..1 screen space (right / down positive, like KPAD)
     float pointerDist;     // metres from the "sensor bar"
@@ -23,11 +31,6 @@ void port_input_set(int chan, const PortPadState* state);
 
 // Rumble requested by the game (0/1) for a channel; read by the input layer.
 int port_input_rumble(int chan);
-
-// Remote tilt (see port_input_use_tilt in port/compat.h): nonzero while the
-// game reads the accelerometer for steering; *neutralPitchDeg is the pitch of
-// the Wii remote that a level-held controller stands for.
-int port_input_tilt_active(float* neutralPitchDeg);
 
 #ifdef __cplusplus
 }

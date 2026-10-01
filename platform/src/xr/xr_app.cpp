@@ -777,39 +777,12 @@ void updateInput(App& a, XrTime time) {
             }
         }
     }
-    // Accelerometer: gravity in the Wii remote's frame (x right, y along the
-    // pointing direction, z out of the button face).  It follows the right
-    // controller only while the game steers by tilt; otherwise the remote
-    // reads as held level and still.
-    pad.accX = 0.0f;
-    pad.accY = 0.0f;
-    pad.accZ = -1.0f;
-    float neutralPitch = 0.0f;
-    if (port_input_tilt_active(&neutralPitch)) {
-        XrSpaceLocation tl{XR_TYPE_SPACE_LOCATION};
-        if (XR_SUCCEEDED(xrLocateSpace(a.aimSpace[1], a.appSpace, time, &tl)) && (tl.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
-            xm::Quat q{tl.pose.orientation.x, tl.pose.orientation.y, tl.pose.orientation.z, tl.pose.orientation.w};
-            // The remote is the controller pitched up by the neutral angle,
-            // so holding the controller level gives the game's neutral grip.
-            float p = neutralPitch * 3.14159265f / 180.0f;
-            xm::Vec3 right = xm::rotate(q, {1, 0, 0});
-            xm::Vec3 fwd = xm::rotate(q, {0, 0, -1});
-            xm::Vec3 up = xm::rotate(q, {0, 1, 0});
-            xm::Vec3 remoteY = fwd * cosf(p) + up * sinf(p);
-            xm::Vec3 remoteZ = up * cosf(p) - fwd * sinf(p);
-            const xm::Vec3 g{0.0f, -1.0f, 0.0f};  // the app space is gravity aligned
-            pad.accX = xm::dot(g, right);
-            pad.accY = xm::dot(g, remoteY);
-            pad.accZ = xm::dot(g, remoteZ);
-        }
-    }
     if (spinFrames > 0) {
         float s = (spinFrames & 1) ? 2.5f : -2.5f;
-        pad.accX += s;
-        pad.accY += s;
+        pad.accX = s;
+        pad.accY = s;
         spinFrames--;
     }
-    pad.nunAccZ = -1.0f;
     if (nunSpinFrames > 0) {
         float s = (nunSpinFrames & 1) ? 2.5f : -2.5f;
         pad.nunAccX = s;
@@ -820,15 +793,24 @@ void updateInput(App& a, XrTime time) {
     // Pointer: where the right controller's aim ray meets the HUD panel (in
     // the diorama) or the virtual screen (menus).  While it is on the VR
     // settings panel beside the pause menu, the game gets no pointer, and an
-    // A press made there goes to the panel.
+    // A press made there goes to the panel.  Which way is down from the
+    // controller tilts the Wii remote where the game steers by tilt.
     XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
     xm::Vec3 aimFrom{0, 0, 0}, aimDir{0, 0, 0};
-    bool aimTracked = XR_SUCCEEDED(xrLocateSpace(a.aimSpace[1], a.appSpace, time, &loc)) &&
-                      (loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) && (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT);
+    bool aimOriented = XR_SUCCEEDED(xrLocateSpace(a.aimSpace[1], a.appSpace, time, &loc)) &&
+                       (loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT);
+    bool aimTracked = aimOriented && (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT);
+    xm::Quat aimQ{loc.pose.orientation.x, loc.pose.orientation.y, loc.pose.orientation.z, loc.pose.orientation.w};
+    if (aimOriented) {
+        const xm::Vec3 down{0.0f, -1.0f, 0.0f};  // the app space is gravity aligned
+        pad.tilted = 1;
+        pad.downX = xm::dot(down, xm::rotate(aimQ, {1, 0, 0}));
+        pad.downY = xm::dot(down, xm::rotate(aimQ, {0, 1, 0}));
+        pad.downZ = xm::dot(down, xm::rotate(aimQ, {0, 0, -1}));
+    }
     if (aimTracked) {
-        xm::Quat q{loc.pose.orientation.x, loc.pose.orientation.y, loc.pose.orientation.z, loc.pose.orientation.w};
         aimFrom = {loc.pose.position.x, loc.pose.position.y, loc.pose.position.z};
-        aimDir = xm::rotate(q, {0, 0, -1});
+        aimDir = xm::rotate(aimQ, {0, 0, -1});
         pad.pointerValid = vr::pointerFromRay(aimFrom, aimDir, &pad.pointerX, &pad.pointerY);
     }
     if (aimTracked != a.aimTracked) {

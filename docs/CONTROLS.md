@@ -30,9 +30,10 @@ Rolling the Star Ball and surfing on the Ray steer with the Wii Remote's
 tilt. There, the right controller's orientation takes its place:
 
 - **Star Ball:** hold the right controller level (it stands for the Wii
-  Remote held upright). Tip it down to roll forward, raise it to roll back,
-  and roll it left or right to steer.
-- **Ray:** hold the right controller level and roll it left or right to
+  Remote held straight up, as the sign asks). Tip it down to roll forward,
+  raise it to roll back, and roll it left or right to steer.
+- **Ray:** hold the right controller level, pointing ahead (the penguin's
+  "point your Wii Remote at the screen"), and twist it left or right to
   turn.
 
 Elsewhere, the game sees a Wii Remote held level and still, so aiming the
