@@ -52,11 +52,18 @@ uint32_t port_host_to_phys(const void* p);
 // ---------------------------------------------------------------------------
 // The disc the game's files come from (platform/src/dvd/dvd.cpp)
 // ---------------------------------------------------------------------------
+typedef struct PortLanguage {
+    const char* name;    // as the `language` setting spells it: "english", "french"...
+    const char* folder;  // the folder the game reads that language's texts from
+    int code;            // the language as the console's setting (SC_LANG_*)
+} PortLanguage;
+#define PORT_DISC_MAX_LANGUAGES 6
 typedef struct PortDisc {
     const char* id;      // game code + maker: "RMGP01", "RMGE01"...
     const char* region;  // for the log
-    const char* folder;  // the language folder the game reads its texts from
-    int language;        // that language as the console's setting (SC_LANG_*)
+    // The languages the disc has texts in, its own first.
+    PortLanguage languages[PORT_DISC_MAX_LANGUAGES];
+    int languageCount;
 } PortDisc;
 // The disc whose converted files are in `root`, told by the language folders
 // in its file table (sys/fst.bin); null when they are those of no region the
@@ -64,6 +71,18 @@ typedef struct PortDisc {
 const PortDisc* port_dvd_identify(const char* root);
 // The disc of the running game.
 const PortDisc* port_dvd_disc(void);
+// The game's language.  The running disc's languages (those whose texts the
+// copy has; index 0 is the disc's own), the one asked for by name
+// (port_language_set, at any time: the game reads it once, when it starts)
+// as an index into them (0 when the disc lacks it), and the one the game
+// started in (-1 before it has).  port_language_start is the game's read:
+// the console's setting (SC_LANG_*) for the language asked for.
+int port_language_count(void);
+const char* port_language_name(int index);
+void port_language_set(const char* name);
+int port_language_wanted(void);
+int port_language_running(void);
+int port_language_start(void);
 
 // ---------------------------------------------------------------------------
 // Virtual CPU: interrupts
@@ -113,6 +132,10 @@ void port_skip_set_hold_seconds(float seconds);  // 0 turns skipping off
 int port_skip_inject_a(void);                    // A as the game should read it, -1: as pressed
 void port_skip_indicator(float* progress, int* forwarding, unsigned* skips);
 int port_input_real_a(void);  // controller 0's A button as the player presses it (wpad.cpp)
+// The camera's left and right turns swapped (the invert_camera setting; the
+// game's side is port_input_camera_inverted in port/compat.h).
+void port_input_set_camera_inverted(int inverted);
+int port_input_camera_inverted(void);
 
 // Frame-time statistics (platform/src/port/perf.cpp), logged every 10 s.
 void port_perf_frame_begin(void);      // the game thread starts a frame

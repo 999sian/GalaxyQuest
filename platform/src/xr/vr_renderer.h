@@ -95,43 +95,64 @@ void init();
 //   sharpening        1 to sharpen (and scale) the diorama with AMD
 //                     FidelityFX CAS as it is composited; 0 (default) off
 //   sharpening_strength  CAS strength, 0 .. 1 (default 0.5)
+//   invert_camera     1 (default) swaps the right stick's left and right
+//                     where they turn the camera: pushing it right turns the
+//                     view to the right (the camera goes round Mario to the
+//                     left); 0 moves the camera the way the stick is pushed,
+//                     as the Wii's D-pad did
+//   passthrough       1 to see the room around the giant screen (the
+//                     headset's passthrough) instead of the dark; 0 (default)
+//   language          the game's language by name (english, french, german,
+//                     spanish, italian; japanese, korean), among those the
+//                     disc has: read when the game starts
 // Call before init() and before creating the swapchains; a missing file
 // keeps the defaults.
 void loadSettings(const char* path);
-float resolutionScale();
+// A numeric setting of that file: its key, the values it may take, its
+// default and how to read and change it.  Changes apply at once, except
+// high_clocks (asked for when the headset session begins).  The settings
+// panel works through these.
+struct Setting {
+    const char* key;
+    float min, max, def;
+    float (*get)();
+    void (*set)(float);
+};
+const Setting* findSetting(const char* key);
 // Swapchain image size relative to the recommended eye size: the
-// resolution setting, at most 1.25 (the game renders at the dynamic scale
-// and the composite resamples).
+// resolution setting when they are made, at most 1.25 (the game renders at
+// the dynamic scale and the composite resamples).
 float swapchainScale();
+// The refresh rate asked for (refresh_rate; the frame loop follows changes),
+// and the rates the display has (from the frame loop, for the panel).
 float refreshRate();
+void setRefreshRates(const float* rates, int count);
+int refreshRates(float* rates, int max);
 bool highClocks();
+// The right stick's camera turns swapped (invert_camera).
+bool invertCamera();
+// The room around the giant screen (the passthrough setting).  Wanted: the
+// setting is on and the giant screen with it, so the headset's passthrough
+// should run.  Shown: how far the eye images are see-through around the
+// screen just now, 0 .. 1 (it fades): while above 0, the frame loop puts the
+// passthrough layer under the eye layer and blends that one by its alpha.
+// Available: the headset has passthrough and it started (the frame loop
+// says); without it the dark stays.
+bool passthroughWanted();
+float passthroughShown();
+bool passthroughAvailable();
+void setPassthroughAvailable(bool available);
 // SpaceWarp on (the setting, or the settings panel's switch since).
 bool spaceWarp();
-void setSpaceWarp(bool on);
 // Meta Quest Super Resolution on the eye images (super_resolution setting).
 bool superResolution();
-void setSuperResolution(bool on);
-// FidelityFX CAS in the composite (sharpening setting).
-bool sharpening();
-void setSharpening(bool on);
-// Gameplay on the giant virtual screen instead of the diorama (giant_screen).
-bool giantScreen();
-void setGiantScreen(bool on);
-// The giant screen's picture in stereoscopic 3D (stereo_screen).
-bool stereoScreen();
-void setStereoScreen(bool on);
-// How deep it is (stereo_depth).
-float stereoDepth();
-void setStereoDepth(float depth);
 // A snap turn of the diorama: its view goes a step (45 deg) round Mario to
 // the right (dir > 0) or the left, behind a blink.  Returns false (the
 // press is the game's D-pad then) unless the diorama is shown with its own
 // yaw (not turn_with_camera).
 bool snapTurn(int dir);
-// The lowest render scale the dynamic resolution may use (min_resolution
-// setting), and the render scale now.
-float minResolution();
-void setMinResolution(float scale);
+// The render scale now (the dynamic resolution moves it between the
+// min_resolution and resolution settings).
 float renderScale();
 
 // Compositor layers for the panels that carry text (xr_app.cpp submits them
@@ -223,13 +244,6 @@ bool takePointerTouch();
 // the frame): the length of the laser drawn from the controller, metres.
 void setAimLength(float metres);
 
-// Diorama distance (Mario's distance in front of the player, metres), as
-// the settings file or the settings panel set it.
-float dioramaDistance();
-void setDioramaDistance(float metres);
-// The giant screen's distance, metres (screen_distance).
-float screenDistance();
-void setScreenDistance(float metres);
 // Draws a premultiplied overlay texture with the model-view-projection
 // `mvp` (a unit quad around the origin), faded by `alpha`.
 void drawOverlayQuad(GLuint texture, const xm::Mat4& mvp, float alpha);

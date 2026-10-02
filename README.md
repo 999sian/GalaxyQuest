@@ -47,7 +47,7 @@ game in VR through OpenXR.
 tabletop, with Mario about 1.5 m in front of you and a little below eye
 level. The world follows him smoothly and turns with his gravity, so he
 always stands upright, even when running round a tiny planet. You look
-around with your own head, and the right stick turns the world in 45 degree
+around with your own head, and the right stick turns the view in 45 degree
 steps. When a wall comes between you and Mario, the part in the way fades
 out. Galaxy intros, launch star flights and a few special views play on a
 big virtual screen, and the pause menu and the HUD float on a panel in front
@@ -60,12 +60,18 @@ sets how far away the screen is: 4.5 m by default, farther for a TV seen
 from the couch, nearer for a cinema. Switch *Stereoscopic 3D* on there and
 each eye gets its own picture, as in a 3D cinema: the game's world gets
 real depth, far behind the screen and out in front of it (*3D depth* sets
-how much).
+how much). Switch *Passthrough* on to see your own room around the screen
+instead of the dark.
 
 **Comfort.** Turning happens in steps behind a short blink, sudden changes
 of gravity also happen behind a blink, and the edges of the view darken
 while the world turns. How far away Mario stands, how quickly the world
-follows him and more can be set: see [docs/CONTROLS.md](docs/CONTROLS.md).
+follows him, which way the right stick turns the camera and more can be set
+on the VR settings panel: see [docs/CONTROLS.md](docs/CONTROLS.md).
+
+**Languages.** The game plays in any language your disc has (English,
+French, German, Spanish or Italian on the European disc; English, French or
+Spanish on the American one): pick it on the *Game* tab of the VR settings.
 
 **Picture and smoothness.** The headset runs at 120 Hz with Meta's
 Application SpaceWarp, the resolution adapts to the load, and Meta Quest
@@ -314,7 +320,7 @@ disc again with the current one.
 | Left trigger | Z | Crouch, ground pound, long and back flip jumps |
 | Left grip | C | Put the game camera behind Mario |
 | X or Menu | − and + | Pause menu (with the VR settings) |
-| Right stick left / right | D-pad | Turn the diorama (or, on the giant screen, the game camera) |
+| Right stick left / right | D-pad | Turn the view round Mario: the diorama, or on the giant screen the game camera (*Invert camera* in the VR settings swaps the two sides) |
 | Right stick up | D-pad up | First-person look |
 
 To recentre the view, hold the Meta button on the right controller. All the
@@ -380,8 +386,8 @@ of them). Known gaps:
 - The HOME menu is not implemented; the Meta button takes its place.
 - The sun's lens flare doesn't show (it reads the picture back, which the
   port's renderer can't).
-- The game runs in English. The Japanese and Korean discs (which would run
-  in their own language) have not been tested.
+- The Japanese and Korean discs (which would run in their own language)
+  have not been tested.
 
 Bug reports are welcome in the
 [issues](https://github.com/bigmak94/GalaxyQuest/issues), ideally with

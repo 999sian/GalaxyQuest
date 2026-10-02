@@ -167,6 +167,10 @@ void port_skip_scene_change(void);
 void port_input_request_pause(void);
 int port_input_take_pause_request(void);
 void port_input_discard_pause_request(void);
+// The invert_camera setting: the D-pad's left and right swapped where they
+// turn the game camera round Mario (and nowhere else: pages and menus keep
+// theirs), so pushing the right stick right turns the view to the right.
+int port_input_camera_inverted(void);
 int64_t port_host_time_ns(void);
 void port_host_sleep_ns(int64_t ns);
 // Delivers pending interrupts (a safe point; only from the thread holding the

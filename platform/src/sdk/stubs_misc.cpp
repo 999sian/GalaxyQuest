@@ -19,12 +19,9 @@ extern "C" {
 // ---------------------------------------------------------------------------
 u8 SCGetAspectRatio(void) { return 1; }     // 16:9
 u8 SCGetEuRgb60Mode(void) { return 1; }     // 60 Hz
-// A language the disc has texts in: English, except on the Japanese and
-// Korean discs (dvd.cpp).
-u8 SCGetLanguage(void) {
-    const PortDisc* disc = port_dvd_disc();
-    return disc ? (u8)disc->language : SC_LANG_ENGLISH;
-}
+// A language the disc has texts in: the one of the `language` setting, or
+// the disc's own first one (dvd.cpp).
+u8 SCGetLanguage(void) { return (u8)port_language_start(); }
 u8 SCGetProgressiveMode(void) { return 1; }
 u8 SCGetSoundMode(void) { return 1; }       // stereo
 

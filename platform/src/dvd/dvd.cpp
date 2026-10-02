@@ -4,8 +4,10 @@
 // game exactly; file sizes come from the cooked (decompressed, byte-swapped)
 // files on the host.  Reads run on a worker thread and complete through the
 // DVD interrupt, like the real drive.
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -92,16 +94,42 @@ static bool fstHasRootDir(const std::vector<u8>& fst, const char* name) {
 // folders named after it (EuEnglish, UsEnglish...), and the game picks the
 // folder from the disc's game code and the console's language
 // (Language.cpp).  The port tells the disc by those folders in its file
-// table, which every conversion has, and runs the game in English where the
-// disc has it.
+// table, which every conversion has, and runs the game in the language of
+// the `language` setting, or the disc's first where it has no such texts.
+// (The European disc also has an EuDutch folder: its texts are the English
+// ones.)
 static const PortDisc kDiscs[] = {
-    {"RMGP01", "Europe", "EuEnglish", SC_LANG_ENGLISH},
-    {"RMGE01", "North America", "UsEnglish", SC_LANG_ENGLISH},
+    {"RMGP01",
+     "Europe",
+     {{"english", "EuEnglish", SC_LANG_ENGLISH},
+      {"french", "EuFrench", SC_LANG_FRENCH},
+      {"german", "EuGerman", SC_LANG_GERMAN},
+      {"spanish", "EuSpanish", SC_LANG_SPANISH},
+      {"italian", "EuItalian", SC_LANG_ITALIAN}},
+     5},
+    {"RMGE01",
+     "North America",
+     {{"english", "UsEnglish", SC_LANG_ENGLISH}, {"french", "UsFrench", SC_LANG_FRENCH}, {"spanish", "UsSpanish", SC_LANG_SPANISH}},
+     3},
     // Not tried: no such disc at hand.
-    {"RMGJ01", "Japan", "JpJapanese", SC_LANG_JAPANESE},
-    {"RMGK01", "Korea", "KrKorean", SC_LANG_KOREAN},
+    {"RMGJ01", "Japan", {{"japanese", "JpJapanese", SC_LANG_JAPANESE}}, 1},
+    {"RMGK01", "Korea", {{"korean", "KrKorean", SC_LANG_KOREAN}}, 1},
 };
 static const PortDisc* sDisc = nullptr;
+// The running disc's languages whose texts are in the copy (the first is the
+// disc's own, which port_dvd_identify checked), the one asked for
+// (port_language_set) and the one the game started in.
+static const PortLanguage* sLanguages[PORT_DISC_MAX_LANGUAGES];
+static int sLanguageCount = 0;
+static char sLanguageWanted[16];
+static const PortLanguage* sLanguageRunning = nullptr;
+
+// Whether the copy in `root` has the texts of a language of its disc.
+static bool hasTexts(const std::string& root, const std::vector<u8>& fst, const PortLanguage& language) {
+    std::string texts = root + "/files/" + language.folder + "/MessageData/Message.arc";
+    struct stat st;
+    return fstHasRootDir(fst, language.folder) && stat(texts.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
 
 extern "C" const PortDisc* port_dvd_identify(const char* root) {
     PortHostAllocScope scope;
@@ -110,10 +138,9 @@ extern "C" const PortDisc* port_dvd_identify(const char* root) {
         return nullptr;
     }
     for (const PortDisc& disc : kDiscs) {
-        // The disc has the folder, and the copy the texts in it.
-        std::string texts = std::string(root) + "/files/" + disc.folder + "/MessageData/Message.arc";
-        struct stat st;
-        if (fstHasRootDir(fst, disc.folder) && stat(texts.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+        // The disc has the folder of its first language, and the copy the
+        // texts in it.
+        if (hasTexts(root, fst, disc.languages[0])) {
             return &disc;
         }
     }
@@ -123,9 +150,66 @@ extern "C" const PortDisc* port_dvd_identify(const char* root) {
 extern "C" const PortDisc* port_dvd_disc(void) { return sDisc; }
 
 extern "C" void port_dvd_set_root(const char* root) {
+    PortHostAllocScope scope;
     sDataRoot = root;
     sDisc = port_dvd_identify(root);
+    sLanguageCount = 0;
+    if (sDisc) {
+        std::vector<u8> fst = readFst(root);
+        for (int i = 0; i < sDisc->languageCount; i++) {
+            if (i == 0 || hasTexts(root, fst, sDisc->languages[i])) {
+                sLanguages[sLanguageCount++] = &sDisc->languages[i];
+            }
+        }
+    }
+    // Debug: PETARI_LANGUAGE=<name> instead of the setting.
+    if (const char* name = getenv("PETARI_LANGUAGE")) {
+        port_language_set(name);
+    }
 }
+
+extern "C" int port_language_count(void) { return sLanguageCount; }
+
+extern "C" const char* port_language_name(int index) { return index >= 0 && index < sLanguageCount ? sLanguages[index]->name : ""; }
+
+extern "C" void port_language_set(const char* name) {
+    size_t n = 0;
+    for (; name && name[n] && n + 1 < sizeof(sLanguageWanted); n++) {
+        sLanguageWanted[n] = (char)tolower((unsigned char)name[n]);
+    }
+    sLanguageWanted[n] = 0;
+}
+
+extern "C" int port_language_wanted(void) {
+    for (int i = 0; i < sLanguageCount; i++) {
+        if (strcmp(sLanguageWanted, sLanguages[i]->name) == 0) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+extern "C" int port_language_running(void) {
+    for (int i = 0; i < sLanguageCount; i++) {
+        if (sLanguages[i] == sLanguageRunning) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+extern "C" int port_language_start(void) {
+    if (sLanguageCount == 0) {
+        return SC_LANG_ENGLISH;
+    }
+    const PortLanguage* language = sLanguages[port_language_wanted()];
+    if (language != sLanguageRunning) {
+        sLanguageRunning = language;
+        port_log("language: %s (texts from %s)", language->name, language->folder);
+    }
+    return language->code;
+}
+
 extern "C" const char* port_dvd_root(void) { return sDataRoot.c_str(); }
 
 static bool loadFst() {

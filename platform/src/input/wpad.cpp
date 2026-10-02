@@ -53,6 +53,13 @@ extern "C" int port_input_take_pause_request(void) {
 
 extern "C" void port_input_discard_pause_request(void) { sPauseRequestAt.store(0); }
 
+// The camera's turns swapped (the invert_camera setting), see compat.h.
+static std::atomic<int> sCameraInverted{0};
+
+extern "C" void port_input_set_camera_inverted(int inverted) { sCameraInverted.store(inverted); }
+
+extern "C" int port_input_camera_inverted(void) { return sCameraInverted.load(); }
+
 static std::atomic<int64_t> sTiltUsedAt{0};
 static std::atomic<float> sTiltNeutralPitch{0.0f};
 

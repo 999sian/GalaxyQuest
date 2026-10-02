@@ -60,6 +60,9 @@ extern "C" void port_headless_xrsim(const char* path, int frames, float yawDeg, 
         if (const char* ini = getenv("PETARI_VRINI")) {
             vr::loadSettings(ini);
         }
+        // The passthrough setting works here too: the room shows as a flat
+        // grey-green in the pictures saved (see below).
+        vr::setPassthroughAvailable(true);
         vr::init();
         // PETARI_XRSIM_SWAPSCALE=<s>: swapchain images at that size instead
         // (relative to the recommended one), e.g. larger than the render
@@ -232,7 +235,17 @@ extern "C" void port_headless_xrsim(const char* path, int frames, float yawDeg, 
             memcpy(&px[((size_t)y * rw * 2 + (size_t)e * rw) * 4], &eyePx[(size_t)y * rw * 4], (size_t)rw * 4);
         }
     }
-    for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+    // Where the eye images are see-through (the passthrough setting) the
+    // compositor shows the room: a flat colour stands for it here.
+    const unsigned char kRoom[3] = {96, 132, 108};
+    for (size_t i = 0; i < px.size(); i += 4) {
+        unsigned a = px[i + 3];
+        for (int c = 0; c < 3 && a < 255; c++) {
+            unsigned v = px[i + c] + (255 - a) * kRoom[c] / 255;
+            px[i + c] = (unsigned char)(v > 255 ? 255 : v);
+        }
+        px[i + 3] = 255;
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (sSmall) {
         port_headless_write_png(path, px.data(), rw / 2, rh / 2);

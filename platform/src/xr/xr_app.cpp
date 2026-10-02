@@ -158,6 +158,21 @@ struct App {
     PFN_xrEnumerateDisplayRefreshRatesFB xrEnumerateDisplayRefreshRatesFB = nullptr;
     PFN_xrGetDisplayRefreshRateFB xrGetDisplayRefreshRateFB = nullptr;
     PFN_xrPerfSettingsSetPerformanceLevelEXT xrPerfSettingsSetPerformanceLevelEXT = nullptr;
+    float requestedHz = 0.0f;  // the refresh rate last asked for (the refresh_rate setting may change in play)
+
+    // The room around the giant screen (the passthrough setting): Meta's
+    // passthrough (XR_FB_passthrough) as a layer under the eye layer, made
+    // when the setting first asks for it and paused while it does not.
+    bool hasPassthrough = false;
+    XrPassthroughFB passthrough = XR_NULL_HANDLE;
+    XrPassthroughLayerFB passthroughLayer = XR_NULL_HANDLE;
+    bool passthroughRunning = false;
+    PFN_xrCreatePassthroughFB xrCreatePassthroughFB = nullptr;
+    PFN_xrPassthroughStartFB xrPassthroughStartFB = nullptr;
+    PFN_xrPassthroughPauseFB xrPassthroughPauseFB = nullptr;
+    PFN_xrCreatePassthroughLayerFB xrCreatePassthroughLayerFB = nullptr;
+    PFN_xrPassthroughLayerResumeFB xrPassthroughLayerResumeFB = nullptr;
+    PFN_xrPassthroughLayerPauseFB xrPassthroughLayerPauseFB = nullptr;
 };
 
 App gApp;
@@ -276,6 +291,12 @@ void initInstance(App& a) {
     if (a.hasPerfMetrics) {
         enable.push_back(XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
     }
+    // Passthrough, for the room around the giant screen (the runtime only
+    // lists it with com.oculus.feature.PASSTHROUGH in the manifest).
+    a.hasPassthrough = hasExtension(exts, XR_FB_PASSTHROUGH_EXTENSION_NAME);
+    if (a.hasPassthrough) {
+        enable.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+    }
     std::string names;
     for (const auto& e : exts) {
         names += ' ';
@@ -309,7 +330,18 @@ void initInstance(App& a) {
     if (a.hasSpaceWarp) {
         props.next = &warpProps;
     }
+    XrSystemPassthroughProperties2FB passProps{XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES2_FB};
+    if (a.hasPassthrough) {
+        passProps.next = props.next;
+        props.next = &passProps;
+    }
     XR_CHECK(xrGetSystemProperties(a.instance, a.system, &props));
+    if (a.hasPassthrough) {
+        a.hasPassthrough = (passProps.capabilities & XR_PASSTHROUGH_CAPABILITY_BIT_FB) != 0;
+        port_log("XR passthrough: %s (capabilities 0x%x)", a.hasPassthrough ? "available" : "not on this headset", (unsigned)passProps.capabilities);
+    } else {
+        port_log("XR passthrough: no extension");
+    }
     port_log("XR system: %s (touch plus ext: %d, refresh ext: %d, performance settings ext: %d)", props.systemName, a.hasTouchPlus, a.hasRefreshRate,
              a.hasPerfSettings);
     if (a.hasSpaceWarp) {
@@ -337,6 +369,17 @@ void initInstance(App& a) {
     if (a.hasRecommendedRes) {
         xrGetInstanceProcAddr(a.instance, "xrGetRecommendedLayerResolutionMETA", (PFN_xrVoidFunction*)&a.xrGetRecommendedLayerResolutionMETA);
     }
+    if (a.hasPassthrough) {
+        xrGetInstanceProcAddr(a.instance, "xrCreatePassthroughFB", (PFN_xrVoidFunction*)&a.xrCreatePassthroughFB);
+        xrGetInstanceProcAddr(a.instance, "xrPassthroughStartFB", (PFN_xrVoidFunction*)&a.xrPassthroughStartFB);
+        xrGetInstanceProcAddr(a.instance, "xrPassthroughPauseFB", (PFN_xrVoidFunction*)&a.xrPassthroughPauseFB);
+        xrGetInstanceProcAddr(a.instance, "xrCreatePassthroughLayerFB", (PFN_xrVoidFunction*)&a.xrCreatePassthroughLayerFB);
+        xrGetInstanceProcAddr(a.instance, "xrPassthroughLayerResumeFB", (PFN_xrVoidFunction*)&a.xrPassthroughLayerResumeFB);
+        xrGetInstanceProcAddr(a.instance, "xrPassthroughLayerPauseFB", (PFN_xrVoidFunction*)&a.xrPassthroughLayerPauseFB);
+        a.hasPassthrough = a.xrCreatePassthroughFB && a.xrPassthroughStartFB && a.xrPassthroughPauseFB && a.xrCreatePassthroughLayerFB &&
+                           a.xrPassthroughLayerResumeFB && a.xrPassthroughLayerPauseFB;
+    }
+    vr::setPassthroughAvailable(a.hasPassthrough);
     if (a.hasPerfMetrics) {
         xrGetInstanceProcAddr(a.instance, "xrEnumeratePerformanceMetricsCounterPathsMETA",
                               (PFN_xrVoidFunction*)&a.xrEnumeratePerformanceMetricsCounterPathsMETA);
@@ -372,6 +415,7 @@ void requestRefreshRate(App& a) {
         if (XR_SUCCEEDED(a.xrEnumerateDisplayRefreshRatesFB(a.session, 0, &n, nullptr)) && n > 0) {
             std::vector<float> rates(n);
             a.xrEnumerateDisplayRefreshRatesFB(a.session, n, &n, rates.data());
+            vr::setRefreshRates(rates.data(), (int)n);  // for the settings panel
             for (float r : rates) {
                 char buf[16];
                 snprintf(buf, sizeof(buf), " %.0f", r);
@@ -380,6 +424,7 @@ void requestRefreshRate(App& a) {
         }
     }
     float want = vr::refreshRate();
+    a.requestedHz = want;
     XrResult r = a.xrRequestDisplayRefreshRateFB(a.session, want);
     port_log("display refresh rates:%s Hz; requested %.0f Hz: %d", list.c_str(), want, (int)r);
     if (XR_FAILED(r)) {
@@ -389,6 +434,48 @@ void requestRefreshRate(App& a) {
     if (a.xrGetDisplayRefreshRateFB && XR_SUCCEEDED(a.xrGetDisplayRefreshRateFB(a.session, &a.displayHz))) {
         port_log("display refresh rate now %.0f Hz", a.displayHz);
     }
+}
+
+// The headset's passthrough runs while the passthrough setting wants the
+// room shown (and until the room has faded out again).  Meta's docs: a
+// paused layer is not submitted, and pausing is how to hide one.
+void updatePassthrough(App& a) {
+    if (!a.hasPassthrough) {
+        return;
+    }
+    bool want = vr::passthroughWanted() || vr::passthroughShown() > 0.0f;
+    if (want == a.passthroughRunning) {
+        return;
+    }
+    if (want) {
+        if (a.passthrough == XR_NULL_HANDLE) {
+            XrPassthroughCreateInfoFB ci{XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
+            XrResult r = a.xrCreatePassthroughFB(a.session, &ci, &a.passthrough);
+            XrPassthroughLayerCreateInfoFB li{XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB};
+            li.passthrough = a.passthrough;
+            li.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
+            XrResult rl = XR_SUCCEEDED(r) ? a.xrCreatePassthroughLayerFB(a.session, &li, &a.passthroughLayer) : r;
+            port_log("XR passthrough: feature and layer created (%d, %d)", (int)r, (int)rl);
+            if (XR_FAILED(r) || XR_FAILED(rl)) {
+                a.hasPassthrough = false;
+                vr::setPassthroughAvailable(false);
+                return;
+            }
+        }
+        XrResult r = a.xrPassthroughStartFB(a.passthrough);
+        XrResult rl = a.xrPassthroughLayerResumeFB(a.passthroughLayer);
+        port_log("XR passthrough: started (%d, %d)", (int)r, (int)rl);
+        if (XR_FAILED(r) || XR_FAILED(rl)) {
+            a.hasPassthrough = false;
+            vr::setPassthroughAvailable(false);
+            return;
+        }
+    } else {
+        XrResult rl = a.xrPassthroughLayerPauseFB(a.passthroughLayer);
+        XrResult r = a.xrPassthroughPauseFB(a.passthrough);
+        port_log("XR passthrough: paused (%d, %d)", (int)r, (int)rl);
+    }
+    a.passthroughRunning = want;
 }
 
 XrAction makeAction(App& a, const char* name, XrActionType type, bool bothHands) {
@@ -753,15 +840,17 @@ void updateInput(App& a, XrTime time) {
     if (getBool(a, a.stickClickAction, a.handPath[1])) pad.buttons |= W_UP;
     // Right stick: the D-pad.  In the diorama left/right turn it in steps
     // round Mario (a snap turn behind a blink; its yaw no longer follows the
-    // game camera); elsewhere they turn the game camera.  Up is the
-    // first-person view.  A direction engages past 0.7 and releases below
-    // 0.4, one press per flick.
+    // game camera); elsewhere they turn the game camera.  With the
+    // invert_camera setting both turn the other way (the game swaps the
+    // D-pad's sides for its camera, CameraLocalUtil.cpp): pushing the stick
+    // right turns the view to the right.  Up is the first-person view.  A
+    // direction engages past 0.7 and releases below 0.4, one press per flick.
     XrVector2f look = getVec2(a, a.lookAction);
     float lx = fabsf(look.x), ly = fabsf(look.y);
     if (a.dpad == 0) {
         if (lx > 0.7f && lx >= ly) {
             a.dpad = look.x < 0.0f ? W_LEFT : W_RIGHT;
-            a.dpadTurned = vr::snapTurn(look.x < 0.0f ? -1 : 1);
+            a.dpadTurned = vr::snapTurn((look.x < 0.0f ? -1 : 1) * (vr::invertCamera() ? -1 : 1));
         } else if (ly > 0.7f) {
             a.dpad = look.y > 0.0f ? W_UP : W_DOWN;
         }
@@ -1312,6 +1401,11 @@ void renderFrame(App& a) {
     XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
     XR_CHECK(xrBeginFrame(a.session, &bi));
     updateAppSpace(a, fs.predictedDisplayTime);
+    updatePassthrough(a);
+    // The refresh_rate setting changed on the settings panel.
+    if (a.requestedHz != 0.0f && vr::refreshRate() != a.requestedHz) {
+        requestRefreshRate(a);
+    }
 
     XrDuration period = fs.predictedDisplayPeriod;
     bool warp = a.hasSpaceWarp && vr::spaceWarp() && fabsf(a.displayHz - 120.0f) < 5.0f;
@@ -1489,7 +1583,20 @@ void renderFrame(App& a) {
     XrCompositionLayerProjectionView projViews[2] = {{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}, {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
     XrCompositionLayerSpaceWarpInfoFB warpInfo[2] = {{XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB}, {XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB}};
     XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    const XrCompositionLayerBaseHeader* layers[1 + vr::kUiLayerCount] = {(XrCompositionLayerBaseHeader*)&layer};
+    // The room first (while its passthrough runs), under everything; then
+    // the eye layer, see-through around the giant screen where the room is
+    // to show; then the panels.
+    XrCompositionLayerPassthroughFB room{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
+    const XrCompositionLayerBaseHeader* layers[2 + vr::kUiLayerCount];
+    uint32_t baseCount = 0;
+    if (fs.shouldRender && a.passthroughRunning) {
+        room.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        room.space = XR_NULL_HANDLE;
+        room.layerHandle = a.passthroughLayer;
+        layers[baseCount++] = (const XrCompositionLayerBaseHeader*)&room;
+        layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;  // premultiplied
+    }
+    layers[baseCount] = (const XrCompositionLayerBaseHeader*)&layer;
     uint32_t layerCount = 0;
     if (fs.shouldRender && a.shownSet >= 0) {
         // The set on show, with the poses its eyes were rendered for (the
@@ -1564,7 +1671,7 @@ void renderFrame(App& a) {
                 quadSettings[k].layerFlags = XR_COMPOSITION_LAYER_SETTINGS_NORMAL_SUPER_SAMPLING_BIT_FB;
                 q.next = &quadSettings[k];
             }
-            layers[layerCount + quadCount - 1] = (const XrCompositionLayerBaseHeader*)&q;
+            layers[baseCount + layerCount + quadCount - 1] = (const XrCompositionLayerBaseHeader*)&q;
         }
     }
     // Meta Quest Super Resolution (the compositor's upscaling and
@@ -1604,7 +1711,9 @@ void renderFrame(App& a) {
     XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
     ei.displayTime = fs.predictedDisplayTime;
     ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-    ei.layerCount = layerCount + quadCount;
+    // Without the eye layer (nothing rendered yet) nothing goes out, the room
+    // included.
+    ei.layerCount = layerCount ? baseCount + layerCount + quadCount : 0;
     ei.layers = layers;
     XrResult end = xrEndFrame(a.session, &ei);
     if (XR_FAILED(end) && warpFrame) {

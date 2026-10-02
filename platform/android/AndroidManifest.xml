@@ -18,6 +18,12 @@
     <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
     <uses-feature android:name="oculus.software.handtracking" android:required="false" />
 
+    <!-- The passthrough setting (the room around the giant screen): the
+         runtime offers XR_FB_passthrough only to apps that declare this; see
+         documentation/native/android/mobile-passthrough.md (2026-10-02).
+         Not required: the game plays without it. -->
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
+
     <!-- The setup screen can use game files anywhere in the headset's storage
          once the player allows it (Android's all files access). -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />

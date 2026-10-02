@@ -424,6 +424,17 @@ bool sStereoScreen = false;   // the giant screen's picture as a stereo pair (st
 float sStereoDepth = 1.75f;   // how far before the farthest things Mario is drawn, in eye distances (stereo_depth)
 float sStereoFar = 0.95f;     // the farthest things' distance apart on the screen, in eye distances (stereo_far)
 float sStereoSize = 0.8f;     // each picture's size relative to the screen's single one (stereo_resolution)
+float sSkipHold = 1.0f;       // seconds A is held to skip a cutscene (skip_hold)
+bool sInvertCamera = true;    // the right stick's turns swapped (invert_camera)
+// The room around the giant screen instead of the dark (passthrough): the
+// eye images are see-through where nothing is drawn, over the headset's
+// passthrough layer (xr_app.cpp).
+bool sPassthrough = false;       // the setting
+bool sPassAvailable = false;     // the headset can show its passthrough
+float sPassAmount = 0.0f;        // how far the room is faded in, 0..1
+float sSwapchainScale = 0.0f;    // the eye swapchains' size, fixed when they are made
+float sRefreshRates[8];          // the display's refresh rates (xr_app.cpp)
+int sRefreshRateCount = 0;
 bool sFlatFresh = false;      // the virtual screen's picture was drawn since its layer last took it
 bool sUiLayers = false;       // the panels with text go out as compositor layers (vr::setUiLayers)
 bool sHudFresh = false;       // eye 0 drew the HUD since the HUD layer last took it
@@ -868,15 +879,80 @@ extern "C" int port_vr_move_axes(float* right, float* up, float* forward) {
 }
 
 
+namespace {
+
+// Every numeric setting of petari_vr.ini (vr::Setting): the file's loader
+// and the settings panel both go through this table.  The defaults are the
+// values the variables start with (taken before the file is read).
+#define FLAG(v) [] { return v ? 1.0f : 0.0f; }, [](float x) { v = x != 0.0f; }
+#define NUMBER(v) [] { return v; }, [](float x) { v = x; }
+vr::Setting sSettings[] = {
+    {"diorama_scale", 0.05f, 20.0f, 0.0f, [] { return sRigParams.scale * 500.0f; }, [](float x) { sRigParams.scale = x / 500.0f; }},
+    {"diorama_height", -3.0f, 3.0f, 0.0f, [] { return -sRigParams.anchor.y; }, [](float x) { sRigParams.anchor.y = -x; }},
+    {"diorama_distance", 0.2f, 20.0f, 0.0f, [] { return -sRigParams.anchor.z; }, [](float x) { sRigParams.anchor.z = -x; }},
+    {"follow_smoothing", 0.0f, 10.0f, 0.0f, NUMBER(sRigParams.posHalfLife)},
+    {"turn_smoothing", 0.0f, 10.0f, 0.0f, NUMBER(sRigParams.rotHalfLife)},
+    {"vignette", 0.0f, 1.0f, 0.0f, NUMBER(sVignetteStrength)},
+    {"cutaway", 0.0f, 1.0f, 0.0f, FLAG(sCutawayOn)},
+    {"turn_with_camera", 0.0f, 1.0f, 0.0f, FLAG(sRigParams.turnWithCamera)},
+    {"skip_hold", 0.0f, 10.0f, 0.0f, [] { return sSkipHold; },
+     [](float x) {
+         sSkipHold = x;
+         port_skip_set_hold_seconds(x);
+     }},
+    {"invert_camera", 0.0f, 1.0f, 0.0f, [] { return sInvertCamera ? 1.0f : 0.0f; },
+     [](float x) {
+         sInvertCamera = x != 0.0f;
+         port_input_set_camera_inverted(sInvertCamera);
+     }},
+    {"resolution", 0.5f, 2.0f, 0.0f, NUMBER(sResolution)},
+    {"min_resolution", 0.5f, 1.25f, 0.0f, NUMBER(sMinScale)},
+    {"refresh_rate", 60.0f, 144.0f, 0.0f, NUMBER(sRefreshRate)},
+    {"high_clocks", 0.0f, 1.0f, 0.0f, FLAG(sHighClocks)},
+    {"space_warp", 0.0f, 1.0f, 0.0f, FLAG(sSpaceWarp)},
+    {"super_resolution", 0.0f, 1.0f, 0.0f, FLAG(sSuperRes)},
+    {"sharpening", 0.0f, 1.0f, 0.0f, FLAG(sSharpen)},
+    {"sharpening_strength", 0.0f, 1.0f, 0.0f, NUMBER(sSharpness)},
+    {"giant_screen", 0.0f, 1.0f, 0.0f, FLAG(sGiantScreen)},
+    {"screen_distance", 1.0f, 20.0f, 0.0f, NUMBER(sScreenDistance)},
+    {"passthrough", 0.0f, 1.0f, 0.0f, FLAG(sPassthrough)},
+    {"stereo_screen", 0.0f, 1.0f, 0.0f, FLAG(sStereoScreen)},
+    {"stereo_depth", 0.25f, 3.0f, 0.0f, NUMBER(sStereoDepth)},
+    {"stereo_far", 0.5f, 1.0f, 0.0f, NUMBER(sStereoFar)},
+    {"stereo_resolution", 0.5f, 1.0f, 0.0f, NUMBER(sStereoSize)},
+};
+#undef FLAG
+#undef NUMBER
+
+void takeDefaults() {
+    static bool sTaken = false;
+    if (sTaken) return;
+    sTaken = true;
+    for (vr::Setting& setting : sSettings) {
+        setting.def = setting.get();
+    }
+}
+
+}  // namespace
+
 namespace vr {
 
+const Setting* findSetting(const char* key) {
+    takeDefaults();
+    for (const Setting& setting : sSettings) {
+        if (!strcmp(setting.key, key)) return &setting;
+    }
+    return nullptr;
+}
+
 void loadSettings(const char* path) {
+    takeDefaults();
     sSettingsPath = path;
     FILE* f = fopen(path, "r");
     if (!f) {
         return;
     }
-    char line[256];
+    char line[1280];
     while (fgets(line, sizeof(line), f)) {
         char key[64];
         float value;
@@ -887,90 +963,60 @@ void loadSettings(const char* path) {
             port_log("%s: game_path = %s", path, sGamePath.c_str());
             continue;
         }
+        if (sscanf(line, " language = %31[A-Za-z]", text) == 1) {
+            port_language_set(text);
+            port_log("%s: language = %s", path, text);
+            continue;
+        }
         if (line[0] == '#' || sscanf(line, " %63[a-z_] = %f", key, &value) != 2) {
             continue;
         }
-        if (!strcmp(key, "diorama_scale") && value > 0.05f) {
-            sRigParams.scale = value / 500.0f;
-        } else if (!strcmp(key, "diorama_height")) {
-            sRigParams.anchor.y = -value;
-        } else if (!strcmp(key, "diorama_distance") && value > 0.2f) {
-            sRigParams.anchor.z = -value;
-        } else if (!strcmp(key, "follow_smoothing") && value >= 0.0f) {
-            sRigParams.posHalfLife = value;
-        } else if (!strcmp(key, "turn_smoothing") && value >= 0.0f) {
-            sRigParams.rotHalfLife = value;
-        } else if (!strcmp(key, "vignette")) {
-            sVignetteStrength = fminf(1.0f, fmaxf(0.0f, value));
-        } else if (!strcmp(key, "cutaway")) {
-            sCutawayOn = value != 0.0f;
-        } else if (!strcmp(key, "skip_hold") && value >= 0.0f) {
-            port_skip_set_hold_seconds(value);
-        } else if (!strcmp(key, "resolution") && value >= 0.5f && value <= 2.0f) {
-            sResolution = value;
-        } else if (!strcmp(key, "refresh_rate") && value >= 60.0f && value <= 144.0f) {
-            sRefreshRate = value;
-        } else if (!strcmp(key, "high_clocks")) {
-            sHighClocks = value != 0.0f;
-        } else if (!strcmp(key, "space_warp")) {
-            sSpaceWarp = value != 0.0f;
-        } else if (!strcmp(key, "super_resolution")) {
-            sSuperRes = value != 0.0f;
-        } else if (!strcmp(key, "sharpening")) {
-            sSharpen = value != 0.0f;
-        } else if (!strcmp(key, "sharpening_strength") && value >= 0.0f && value <= 1.0f) {
-            sSharpness = value;
-        } else if (!strcmp(key, "min_resolution") && value >= 0.5f && value <= 1.25f) {
-            sMinScale = value;
-        } else if (!strcmp(key, "giant_screen")) {
-            sGiantScreen = value != 0.0f;
-        } else if (!strcmp(key, "screen_distance") && value >= 1.0f && value <= 20.0f) {
-            sScreenDistance = value;
-        } else if (!strcmp(key, "stereo_screen")) {
-            sStereoScreen = value != 0.0f;
-        } else if (!strcmp(key, "stereo_depth") && value >= 0.25f && value <= 3.0f) {
-            sStereoDepth = value;
-        } else if (!strcmp(key, "stereo_far") && value >= 0.5f && value <= 1.0f) {
-            sStereoFar = value;
-        } else if (!strcmp(key, "stereo_resolution") && value >= 0.5f && value <= 1.0f) {
-            sStereoSize = value;
-        } else if (!strcmp(key, "turn_with_camera")) {
-            sRigParams.turnWithCamera = value != 0.0f;
-        } else {
+        const Setting* setting = findSetting(key);
+        if (!setting) {
             port_log("%s: unknown setting %s", path, key);
             continue;
         }
-        port_log("%s: %s = %g", path, key, value);
+        float taken = fminf(setting->max, fmaxf(setting->min, value));
+        setting->set(taken);
+        if (taken != value) {
+            port_log("%s: %s = %g (%g is outside %g to %g)", path, key, taken, value, setting->min, setting->max);
+        } else {
+            port_log("%s: %s = %g", path, key, value);
+        }
     }
     fclose(f);
 }
 
-float resolutionScale() { return sResolution; }
-float dioramaDistance() { return -sRigParams.anchor.z; }
-void setDioramaDistance(float metres) { sRigParams.anchor.z = -metres; }
-float screenDistance() { return sScreenDistance; }
 const std::string& gamePath() { return sGamePath; }
-void setScreenDistance(float metres) { sScreenDistance = metres; }
 void setAimLength(float metres) {
     sAimLength = metres;
     sAimOnPanel = true;
 }
 void drawOverlayQuad(GLuint texture, const xm::Mat4& mvp, float alpha) { drawQuad(texture, mvp, false, alpha); }
-float swapchainScale() { return fminf(sResolution, 1.25f); }
+// Fixed once the swapchains are made from it (the resolution setting may
+// change in play; the dynamic resolution's range follows it at once).
+float swapchainScale() {
+    if (sSwapchainScale <= 0.0f) sSwapchainScale = fminf(sResolution, 1.25f);
+    return sSwapchainScale;
+}
 float refreshRate() { return sRefreshRate; }
+void setRefreshRates(const float* rates, int count) {
+    sRefreshRateCount = count < 8 ? count : 8;
+    for (int i = 0; i < sRefreshRateCount; i++) sRefreshRates[i] = rates[i];
+}
+int refreshRates(float* rates, int max) {
+    int n = sRefreshRateCount < max ? sRefreshRateCount : max;
+    for (int i = 0; i < n; i++) rates[i] = sRefreshRates[i];
+    return n;
+}
+bool invertCamera() { return sInvertCamera; }
+bool passthroughWanted() { return sPassthrough && sGiantScreen; }
+float passthroughShown() { return sPassAmount; }
+bool passthroughAvailable() { return sPassAvailable; }
+void setPassthroughAvailable(bool available) { sPassAvailable = available; }
 bool highClocks() { return sHighClocks; }
 bool spaceWarp() { return sSpaceWarp; }
-void setSpaceWarp(bool on) { sSpaceWarp = on; }
 bool superResolution() { return sSuperRes; }
-void setSuperResolution(bool on) { sSuperRes = on; }
-bool sharpening() { return sSharpen; }
-void setSharpening(bool on) { sSharpen = on; }
-bool giantScreen() { return sGiantScreen; }
-void setGiantScreen(bool on) { sGiantScreen = on; }
-bool stereoScreen() { return sStereoScreen; }
-void setStereoScreen(bool on) { sStereoScreen = on; }
-float stereoDepth() { return sStereoDepth; }
-void setStereoDepth(float depth) { sStereoDepth = fminf(3.0f, fmaxf(0.25f, depth)); }
 bool snapTurn(int dir) {
     if (!sVrMode || !sRig.valid || sRigParams.turnWithCamera || dir == 0) return false;
     sRig.pendingTurn += (dir > 0 ? 1.0f : -1.0f) * 0.78539816f;
@@ -1338,8 +1384,6 @@ void notePerformance(float appGpuMs, float compositorGpuMs, float gpuUtilization
     if (ms >= kBusyM * sMetricBudgetMs) sLastBusyAt = sNow;
 }
 
-float minResolution() { return sMinScale; }
-void setMinResolution(float scale) { sMinScale = fminf(1.25f, fmaxf(0.5f, scale)); }
 float renderScale() { return sScale; }
 
 void noteMissedRefreshes(int count) {
@@ -1396,6 +1440,8 @@ void init() {
     ensureTarget(sHud, 1600, 900);
     ensureTarget(sFlat, 2048, 1152);
     initTimers();
+    takeDefaults();
+    port_input_set_camera_inverted(sInvertCamera);
     settingsInit(sSettingsPath.c_str());
 }
 
@@ -1439,6 +1485,10 @@ void beginFrame(const FrameInfo& frame) {
     updateSkipIndicator(dt);
     sVrMode = sShownVrMode && r.hasFrame() && r.camera().valid;
     sDioramaShown.store(sVrMode ? 1 : 0);
+    // The room around the giant screen (passthrough) fades in and out with
+    // the setting; the diorama fills the view itself.
+    float room = sPassthrough && sPassAvailable && sGiantScreen && !sShownVrMode ? 1.0f : 0.0f;
+    sPassAmount = room > sPassAmount ? fminf(room, sPassAmount + dt / 0.3f) : fmaxf(room, sPassAmount - dt / 0.3f);
     if (sVrMode) {
         bool wasValid = sRig.valid;
         xm::Vec3 prevPivot = sRig.pivot;
@@ -1642,7 +1692,11 @@ Extent renderEye(int eye, const FrameInfo& frame, GLuint fbo, int width, int hei
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glClearColor(0.004f, 0.004f, 0.012f, 1.0f);
+        // The dark around the screen; with the passthrough setting the image
+        // is see-through there instead (premultiplied alpha), and the
+        // compositor shows the room behind it.
+        float dark = 1.0f - sPassAmount;
+        glClearColor(0.004f * dark, 0.004f * dark, 0.012f * dark, dark);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         if (r.hasFrame() && !sUiLayers) {
             drawPanel(sStereoFrame ? sFlatPair[eye] : sFlat, viewProj * panelModel(screenCenter(), screenWidth(), (float)sFlat.width / sFlat.height),

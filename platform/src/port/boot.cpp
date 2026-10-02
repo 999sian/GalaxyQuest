@@ -24,7 +24,7 @@ extern "C" void port_boot(const char* dataRoot, const char* saveRoot) {
                    "folder with the game's texts in sys/fst.bin and files/)",
                    dataRoot);
     }
-    port_log("disc: %s (%s), texts from %s", disc->id, disc->region, disc->folder);
+    port_log("disc: %s (%s), %d languages", disc->id, disc->region, port_language_count());
     port_mem_set_disc_id(disc->id);
     port_dvd_load_dol_data(dataRoot);
     port_nand_set_root(saveRoot);

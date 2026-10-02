@@ -26,8 +26,8 @@ Technical notes for people working on the port. For playing, see the
 - The giant screen (a switch on the VR settings panel, `giant_screen`)
   plays the whole game on a 16:9 virtual screen from the game's own camera
   instead of the diorama (the default at first start): 5.33 m wide,
-  `screen_distance` away (4.5 m by default; the settings panel's slider
-  sets it while the giant screen is on). The game draws its 16:9 picture
+  `screen_distance` away (4.5 m by default; a slider on the settings
+  panel's Screen tab). The game draws its 16:9 picture
   squeezed into its 640x456 frame (the
   TV stretched it back out), so the screen's and the HUD panel's targets
   are 16:9 (2048x1152 and 1600x900). The screen's layer is mipmapped and
@@ -303,6 +303,22 @@ In the diorama:
   Resolution) on the layer: the compositor scales it to the display once,
   instead of after a bilinear pass in the app. The virtual screen still
   fills the whole image.
+- Passthrough around the giant screen (`passthrough`, off by default):
+  Meta's `XR_FB_passthrough` (the manifest declares
+  `com.oculus.feature.PASSTHROUGH`, without which the runtime does not list
+  the extension). The feature and one reconstruction layer are made the
+  first time the setting asks for them, and paused while it does not. While
+  they run, the frame's first layer is the passthrough layer, and the eye
+  layer goes out with `XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT`:
+  around the screen the eye images are cleared to transparent black instead
+  of the dark (premultiplied alpha; the laser and the skip ring blend into
+  them as before), so the room shows there. The clear's alpha fades over
+  0.3 s when the setting changes. The diorama's eye images are opaque. In
+  the headless simulator a flat grey-green stands for the room. Measured
+  in the headset (unworn, Good Egg on the giant screen, SpaceWarp on): the
+  compositor's GPU time goes from 1.9 ms a refresh to 3.1-4.2 ms and the
+  GPU from 65% to 82% busy; the game still shows 592-599 of its 600 frames
+  in 10 s (597-600 without), with 6-22 refreshes missed instead of 0-6.
 - The HUD panel (with the pause menu and dialogs) and the VR settings panel
   go to the compositor as quad layers of their own (`XrCompositionLayerQuad`,
   premultiplied, sRGB; `vr::uiLayer`), as Meta recommends for text: sampled
@@ -403,9 +419,14 @@ In the diorama:
   those folders in the disc's file table (`sys/fst.bin`, which every
   conversion has and every file lookup goes through), puts the matching
   code (`RMGP01`, `RMGE01`...) at 0x80000000 and answers `SCGetLanguage`
-  with a language that disc has: English, or the disc's own on the Japanese
-  and Korean ones. With a wrong code the game asks for another region's folder
-  and stops at its first text archive (`FileRipper`: "File isn't exist").
+  with a language that disc has: the one of the `language` setting when the
+  disc has its texts (the European disc: English, French, German, Spanish,
+  Italian; the American one: English, French, Spanish), otherwise the
+  disc's first. The game reads it once, when `GameSystemObjHolder` is made,
+  so a change on the settings panel shows at the next start. (The European
+  disc's `EuDutch` folder holds the English texts again: not offered.) With
+  a wrong code the game asks for another region's folder and stops at its
+  first text archive (`FileRipper`: "File isn't exist").
   The European and American discs' other files are the same but for a few
   object placements (Gusty Garden, Rolling Gizmo) and the wording of the
   texts. A folder whose file table names none of those text folders, or
@@ -413,6 +434,18 @@ In the diorama:
 - Every save file can be played with Mario or Luigi from the start
   (`FileSelector::isUserFileAppearLuigi`): the Mario/Luigi switch the game
   shows once Mario has finished it is on every file's start screen.
+- The camera's turns (`invert_camera`, on by default): the game moves its
+  camera round Mario the way the D-pad is pressed, so the view turns the
+  other way. With the setting, `CameraLocalUtil`'s two tests of the D-pad
+  for the camera swap sides (so do the two arrows of the camera guide,
+  `CameraInfo`), and the diorama's snap turn takes the other sign: pushing
+  the right stick right turns the view to the right. Pages and menus read
+  the D-pad themselves and keep their sides.
+- The settings (`petari_vr.ini`): one table in `vr_game.cpp`
+  (`vr::Setting`: key, range, default, how to read and change it) serves
+  the file's loader and the settings panel (`vr_settings.cpp`), whose four
+  tabs are tables of rows over those keys (a switch, a stepper or a
+  slider). The panel writes only the lines of the settings changed on it.
 
 ## Development tools
 
@@ -453,6 +486,8 @@ controlled with environment variables:
 | `PETARI_ASYNC=1`, `PETARI_NOCOPY=1` | Use the worker-thread renderer path; perf experiments |
 | `PETARI_DLCHECK=1`, `PETARI_NODLCACHE=1` | Decode every draw the display list cache supplies as well and log any difference; turn the cache off |
 | `PETARI_XRSIM_AIM="t0-t1:x,y,z[:A];..."`, `PETARI_VRINI=path` | Aim the simulated controller at stage point x,y,z from t0 to t1 s after boot, holding A with `:A` (to work the VR settings panel); the settings file `PETARI_XRSIM` reads and the panel writes |
+| `PETARI_PANELLOG=1` | Log the stage point of every control of the VR settings panel (tab by tab), to aim at with `PETARI_XRSIM_AIM` |
+| `PETARI_LANGUAGE=name` | The game's language (`french`, `spanish`...) instead of the `language` setting, which the headless runner reads too late (with `PETARI_VRINI`, after the game has started) |
 
 The VR app takes the same variables from `petari_debug.env` (`NAME=value`
 lines) next to the game data, in
