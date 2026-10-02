@@ -37,6 +37,9 @@ void port_log_file(const char* path);
 #define PORT_LOCKED_CACHE 0xE0000000u
 
 int port_mem_init(void);
+// The disc's ID (game code + maker, 6 characters), which the console's
+// loader leaves at the start of memory.
+void port_mem_set_disc_id(const char* id);
 // Page-granular allocations below 4 GiB (never freed individually).
 void* port_low_alloc(size_t size);
 int port_is_game_memory(const void* p);
@@ -45,6 +48,22 @@ int port_is_game_memory(const void* p);
 // registers) and host pointers.
 void* port_phys_to_host(uint32_t phys);
 uint32_t port_host_to_phys(const void* p);
+
+// ---------------------------------------------------------------------------
+// The disc the game's files come from (platform/src/dvd/dvd.cpp)
+// ---------------------------------------------------------------------------
+typedef struct PortDisc {
+    const char* id;      // game code + maker: "RMGP01", "RMGE01"...
+    const char* region;  // for the log
+    const char* folder;  // the language folder the game reads its texts from
+    int language;        // that language as the console's setting (SC_LANG_*)
+} PortDisc;
+// The disc whose converted files are in `root`, told by the language folders
+// in its file table (sys/fst.bin); null when they are those of no region the
+// port knows, or the texts are not there.
+const PortDisc* port_dvd_identify(const char* root);
+// The disc of the running game.
+const PortDisc* port_dvd_disc(void);
 
 // ---------------------------------------------------------------------------
 // Virtual CPU: interrupts

@@ -86,9 +86,9 @@ extern "C" int port_mem_init(void) {
     // Locked-cache scratchpad (16 KiB on hardware).
     mapAt(PORT_LOCKED_CACHE, 0x4000, -1);
 
-    // OS globals (see YAGCD / Wii low memory map).
+    // OS globals (see YAGCD / Wii low memory map).  The disc's ID at 0 comes
+    // with the game's files (port_mem_set_disc_id).
     const uintptr_t g = PORT_MEM1_BASE;
-    memcpy((void*)(g + 0x00), "RMGP01", 6);  // game code + maker
     storeBE32(g + 0x20, 0x0D15EA5E);           // boot magic
     storeBE32(g + 0x24, 1);                    // version
     storeBE32(g + 0x28, PORT_MEM1_SIZE);       // physical MEM1 size
@@ -114,6 +114,10 @@ extern "C" int port_mem_init(void) {
     PORT_LOG("mem: MEM1 %08x+%x MEM2 %08x+%x mapped (uncached mirrors at %08x/%08x)", PORT_MEM1_BASE, PORT_MEM1_SIZE, PORT_MEM2_BASE,
              PORT_MEM2_SIZE, PORT_MEM1_UNCACHED, PORT_MEM2_UNCACHED);
     return 1;
+}
+
+extern "C" void port_mem_set_disc_id(const char* id) {
+    memcpy((void*)(uintptr_t)PORT_MEM1_BASE, id, 6);  // game code + maker
 }
 
 // ---------------------------------------------------------------------------

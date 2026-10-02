@@ -18,6 +18,14 @@ extern "C" void port_boot(const char* dataRoot, const char* saveRoot) {
     port_mem_init();
     port_os_time_init();
     port_dvd_set_root(dataRoot);
+    const PortDisc* disc = port_dvd_disc();
+    if (!disc) {
+        port_fatal("%s: not the files of a Super Mario Galaxy disc the port knows (no EuEnglish, UsEnglish, JpJapanese or KrKorean "
+                   "folder with the game's texts in sys/fst.bin and files/)",
+                   dataRoot);
+    }
+    port_log("disc: %s (%s), texts from %s", disc->id, disc->region, disc->folder);
+    port_mem_set_disc_id(disc->id);
     port_dvd_load_dol_data(dataRoot);
     port_nand_set_root(saveRoot);
     port_gx_init();

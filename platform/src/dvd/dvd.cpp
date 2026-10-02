@@ -22,6 +22,7 @@
 #include "port/port.h"
 #include "revolution/dvd.h"
 #include "revolution/os.h"
+#include "revolution/sc.h"
 
 enum {
     kStateEnd = 0,
@@ -45,25 +46,95 @@ static std::vector<FstEntry> sFst;
 static std::string sDataRoot;
 static u32 sCurrentDir = 0;
 
-extern "C" void port_dvd_set_root(const char* root) { sDataRoot = root; }
-extern "C" const char* port_dvd_root(void) { return sDataRoot.c_str(); }
-
 static u32 be32(const u8* p) { return ((u32)p[0] << 24) | ((u32)p[1] << 16) | ((u32)p[2] << 8) | p[3]; }
 
-static bool loadFst() {
-    PortHostAllocScope scope;
-    std::string path = sDataRoot + "/sys/fst.bin";
-    FILE* f = fopen(path.c_str(), "rb");
+// The disc's file table (sys/fst.bin under `root`): 12-byte entries, the
+// root's holding their count, then the names.  Empty when missing or cut.
+static std::vector<u8> readFst(const std::string& root) {
+    std::vector<u8> data;
+    FILE* f = fopen((root + "/sys/fst.bin").c_str(), "rb");
     if (!f) {
-        port_log("dvd: cannot open %s", path.c_str());
-        return false;
+        return data;
     }
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
-    std::vector<u8> data((size_t)len);
-    fread(data.data(), 1, (size_t)len, f);
+    if (len >= 12) {
+        data.resize((size_t)len);
+        if (fread(data.data(), 1, data.size(), f) != data.size() || (uint64_t)be32(&data[8]) * 12 >= data.size()) {
+            data.clear();
+        }
+    }
     fclose(f);
+    return data;
+}
+
+// Whether the disc's root directory has a folder `name`.
+static bool fstHasRootDir(const std::vector<u8>& fst, const char* name) {
+    u32 count = be32(&fst[8]);
+    const char* strings = (const char*)&fst[count * 12];
+    size_t stringsSize = fst.size() - count * 12;
+    size_t len = strlen(name);
+    for (u32 i = 1; i < count;) {
+        const u8* e = &fst[i * 12];
+        bool isDir = e[0] != 0;
+        u32 nameOff = be32(e) & 0x00FFFFFF;
+        if (isDir && nameOff + len < stringsSize && strncasecmp(strings + nameOff, name, len + 1) == 0) {
+            return true;
+        }
+        u32 next = be32(e + 8);
+        i = (isDir && next > i) ? next : i + 1;  // past a folder's contents
+    }
+    return false;
+}
+
+// Each region's disc keeps its texts and translated layouts in language
+// folders named after it (EuEnglish, UsEnglish...), and the game picks the
+// folder from the disc's game code and the console's language
+// (Language.cpp).  The port tells the disc by those folders in its file
+// table, which every conversion has, and runs the game in English where the
+// disc has it.
+static const PortDisc kDiscs[] = {
+    {"RMGP01", "Europe", "EuEnglish", SC_LANG_ENGLISH},
+    {"RMGE01", "North America", "UsEnglish", SC_LANG_ENGLISH},
+    // Not tried: no such disc at hand.
+    {"RMGJ01", "Japan", "JpJapanese", SC_LANG_JAPANESE},
+    {"RMGK01", "Korea", "KrKorean", SC_LANG_KOREAN},
+};
+static const PortDisc* sDisc = nullptr;
+
+extern "C" const PortDisc* port_dvd_identify(const char* root) {
+    PortHostAllocScope scope;
+    std::vector<u8> fst = readFst(root);
+    if (fst.empty()) {
+        return nullptr;
+    }
+    for (const PortDisc& disc : kDiscs) {
+        // The disc has the folder, and the copy the texts in it.
+        std::string texts = std::string(root) + "/files/" + disc.folder + "/MessageData/Message.arc";
+        struct stat st;
+        if (fstHasRootDir(fst, disc.folder) && stat(texts.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+            return &disc;
+        }
+    }
+    return nullptr;
+}
+
+extern "C" const PortDisc* port_dvd_disc(void) { return sDisc; }
+
+extern "C" void port_dvd_set_root(const char* root) {
+    sDataRoot = root;
+    sDisc = port_dvd_identify(root);
+}
+extern "C" const char* port_dvd_root(void) { return sDataRoot.c_str(); }
+
+static bool loadFst() {
+    PortHostAllocScope scope;
+    std::vector<u8> data = readFst(sDataRoot);
+    if (data.empty()) {
+        port_log("dvd: cannot read %s/sys/fst.bin", sDataRoot.c_str());
+        return false;
+    }
 
     u32 count = be32(&data[8]);
     const u8* strings = &data[count * 12];

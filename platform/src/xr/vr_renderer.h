@@ -266,8 +266,9 @@ void saveGamePath(const std::string& path);
 // Whether `dir` holds the game's files (sys/fst.bin and files/), and if so
 // whether they are converted for the port (tools/cook/cook.py); *outdated:
 // converted by an older converter, without the data it now also takes from
-// main.dol (sys/ErrorMessageArchive.arc and two tables).
-bool isGameFolder(const std::string& dir, bool* ready, bool* outdated = nullptr);
+// main.dol (sys/ErrorMessageArchive.arc and two tables); *unknown: converted,
+// but the files of no disc the port knows (port_dvd_identify).
+bool isGameFolder(const std::string& dir, bool* ready, bool* outdated = nullptr, bool* unknown = nullptr);
 
 // The setup screen (vr_setup.cpp), shown instead of the game while its files
 // are missing.  setupStart opens it (after vr::init) and searches the app's

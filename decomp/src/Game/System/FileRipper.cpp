@@ -41,6 +41,9 @@ void* FileRipper::loadToMainRAM(const char* fpath, u8* dest, bool decompress, JK
     u32 decompressedSize;
 
     if (!MR::isFileExist(fpath, false)) {
+#ifdef TARGET_PC
+        OSReport("FileRipper: the disc has no file %s\n", fpath);
+#endif
         OSPanic(__FILE__, 0x70, "File isn't exist.");
     }
 

@@ -394,6 +394,22 @@ In the diorama:
   A folder counts when it has `sys/fst.bin` and `files/`, and is converted
   when `files/ObjectData/Coin.arc` starts `CRAR` (the disc's own archives
   are Yaz0). Picking one saves `game_path` and boots the game from it.
+- The disc's region (`port_dvd_identify` in `dvd.cpp`): each region's disc
+  keeps its texts and translated layouts in language folders of its own
+  (`EuEnglish`, `UsEnglish`, `JpJapanese`, `KrKorean`...), and the game
+  picks the folder from the disc's game code and the console's language
+  (`Language.cpp`, whose table the port indexes by the code in low memory
+  instead of the Korean build's fixed row). The port reads the region off
+  those folders in the disc's file table (`sys/fst.bin`, which every
+  conversion has and every file lookup goes through), puts the matching
+  code (`RMGP01`, `RMGE01`...) at 0x80000000 and answers `SCGetLanguage`
+  with a language that disc has: English, or the disc's own on the Japanese
+  and Korean ones. With a wrong code the game asks for another region's folder
+  and stops at its first text archive (`FileRipper`: "File isn't exist").
+  The European and American discs' other files are the same but for a few
+  object placements (Gusty Garden, Rolling Gizmo) and the wording of the
+  texts. A folder whose file table names none of those text folders, or
+  whose copy lacks the texts, shows as "Unknown disc" on the setup screen.
 - Every save file can be played with Mario or Luigi from the start
   (`FileSelector::isUserFileAppearLuigi`): the Mario/Luigi switch the game
   shows once Mario has finished it is on every file's start screen.

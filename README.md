@@ -85,8 +85,8 @@ story and saves all come from the game's own code and your own game files.
   (a charge-only cable does not work).
 - **Your Super Mario Galaxy disc**, dumped as an ISO, RVZ or WBFS image (for
   example with [CleanRip](https://wiibrew.org/wiki/CleanRip) on a Wii), or
-  already extracted. Tested with the European disc (RMGP01); the other
-  regions have not been tried yet.
+  already extracted. The European (RMGP01) and American (RMGE01) discs are
+  tested; the Japanese and Korean ones have not been tried yet.
 - A **computer** (Windows, macOS or Linux) with about 10 GB free, and three
   free programs on it:
   - [Python 3.8 or newer](https://www.python.org/downloads/), which runs
@@ -273,6 +273,10 @@ button opens the pause menu, with the VR settings beside it.
   below).
 - **A folder shows as *Not converted* or *Convert again*** on the setup
   screen: run step 6 with the current converter, then step 7.
+- **A folder shows as *Unknown disc*** on the setup screen: it has none of
+  the folders the game keeps its texts in (`EuEnglish`, `UsEnglish`...).
+  The copy is incomplete, or the disc is not Super Mario Galaxy: run
+  steps 6 and 7 again.
 
 ### Where the game files go
 
@@ -376,7 +380,8 @@ of them). Known gaps:
 - The HOME menu is not implemented; the Meta button takes its place.
 - The sun's lens flare doesn't show (it reads the picture back, which the
   port's renderer can't).
-- Discs other than the European one have not been tested.
+- The game runs in English. The Japanese and Korean discs (which would run
+  in their own language) have not been tested.
 
 Bug reports are welcome in the
 [issues](https://github.com/bigmak94/GalaxyQuest/issues), ideally with

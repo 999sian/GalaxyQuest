@@ -53,6 +53,10 @@ struct Found {
     std::string path;
     bool ready;     // converted for the port (else extracted but not converted)
     bool outdated;  // converted by an older converter: to convert again
+    bool unknown;   // converted, but not a disc the port knows
+
+    // Why the folder cannot be played from.
+    const char* problem() const { return outdated ? "Convert again" : unknown ? "Unknown disc" : "Not converted"; }
 };
 
 // Setup state, shared with the search thread.
@@ -109,9 +113,9 @@ bool isDir(const std::string& path) {
 }
 
 void scanDir(const std::string& dir, int depth, bool skipAndroid, std::vector<Found>& out, int64_t deadline) {
-    bool ready = false, outdated = false;
-    if (vr::isGameFolder(dir, &ready, &outdated)) {
-        out.push_back({dir, ready, outdated});
+    bool ready = false, outdated = false, unknown = false;
+    if (vr::isGameFolder(dir, &ready, &outdated, &unknown)) {
+        out.push_back({dir, ready, outdated, unknown});
         return;
     }
     if (depth <= 0 || out.size() >= 16 || port_host_time_ns() > deadline) {
@@ -158,7 +162,8 @@ void search() {
         std::stable_sort(found.begin(), found.end(), [](const Found& a, const Found& b) { return a.ready > b.ready; });
         port_log("setup: %zu game folders found (all files access %s)", found.size(), access ? "on" : "off");
         for (const Found& f : found) {
-            port_log("setup:   %s (%s)", f.path.c_str(), f.ready ? "ready" : f.outdated ? "converted by an older version" : "not converted");
+            port_log("setup:   %s (%s)", f.path.c_str(),
+                     f.ready ? "ready" : f.outdated ? "converted by an older version" : f.unknown ? "unknown disc" : "not converted");
         }
         {
             std::lock_guard<std::mutex> lock(sLock);
@@ -237,7 +242,7 @@ void drawPanel() {
         if (found[i].ready) {
             drawButton(c, kTexW - 250, top + 8, kTexW - 60, top + kRowH - 18, "Play", (Control)(kUse0 + i), true);
         } else {
-            c.text(kTexW - 60, top + 44, kFontSmall, found[i].outdated ? "Convert again" : "Not converted", rgb(255, 170, 110), 2);
+            c.text(kTexW - 60, top + 44, kFontSmall, found[i].problem(), rgb(255, 170, 110), 2);
         }
     }
     if (!found.empty() && searching) {
@@ -288,7 +293,7 @@ Control controlAt(float x, float y) {
 
 namespace vr {
 
-bool isGameFolder(const std::string& dir, bool* ready, bool* outdated) {
+bool isGameFolder(const std::string& dir, bool* ready, bool* outdated, bool* unknown) {
     struct stat st;
     if (stat((dir + "/sys/fst.bin").c_str(), &st) != 0 || !S_ISREG(st.st_mode) || !isDir(dir + "/files")) {
         return false;
@@ -303,8 +308,11 @@ bool isGameFolder(const std::string& dir, bool* ready, bool* outdated) {
     for (const char* name : {"ErrorMessageArchive.arc", "StoryEvent.bcsv", "GalaxyID.bcsv"}) {
         dolData = dolData && stat((dir + "/sys/" + name).c_str(), &st) == 0 && S_ISREG(st.st_mode);
     }
-    if (ready) *ready = converted && dolData;
+    // The disc's region, which tells the game where its texts are.
+    bool known = port_dvd_identify(dir.c_str()) != nullptr;
+    if (ready) *ready = converted && dolData && known;
     if (outdated) *outdated = converted && !dolData;
+    if (unknown) *unknown = converted && dolData && !known;
     return true;
 }
 

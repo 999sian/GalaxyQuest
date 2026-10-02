@@ -2,6 +2,9 @@
 # Pushes the current build to the headset and boots it headless.
 #   tools/run_headless.sh [seconds] [--no-push]
 # On a crash, prints the symbolized backtrace from the crash log buffer.
+# HEADLESS_DATA: game files on the headset other than the app's own (another
+# region's disc).  HEADLESS_NAND: the save folder; the snapshots go to shots/
+# next to it.
 cd "$(dirname "$0")/.."
 export MSYS_NO_PATHCONV=1
 source tools/env.sh
@@ -9,7 +12,9 @@ ADB=$(find_adb) || { echo "adb not found" >&2; exit 1; }
 NDKBIN=$(ndk_llvm_bin)
 SECS=${1:-20}
 DEV=/data/local/tmp/petari
-DATA=/sdcard/Android/data/com.galaxy.quest/files/game
+DATA=${HEADLESS_DATA:-/sdcard/Android/data/com.galaxy.quest/files/game}
+NAND=${HEADLESS_NAND:-$DEV/nand}
+SHOTS=$(dirname $NAND)/shots
 
 if [ "$2" != "--no-push" ]; then
   mkdir -p out/headless
@@ -25,9 +30,9 @@ for v in PETARI_XRSIM_MV PETARI_PERFLOG PETARI_XRSIM_FPS PETARI_AUDIOLOG PETARI_
   if [ -n "${!v}" ]; then ENVS="$ENVS $v='${!v}'"; fi
 done
 
-$ADB shell "mkdir -p $DEV/shots && rm -f $DEV/shots/*.png"
+$ADB shell "mkdir -p $NAND $SHOTS && rm -f $SHOTS/*.png"
 $ADB logcat -b crash -c
-$ADB shell "cd $DEV &&$ENVS LD_LIBRARY_PATH=$DEV timeout $((SECS + 10)) ./petari_headless $DATA ${HEADLESS_NAND:-$DEV/nand} $SECS; echo \"[exit status \$?]\"" 2>&1 | tee out/headless/last_run.txt
+$ADB shell "cd $DEV &&$ENVS LD_LIBRARY_PATH=$DEV timeout $((SECS + 10)) ./petari_headless $DATA $NAND $SECS; echo \"[exit status \$?]\"" 2>&1 | tee out/headless/last_run.txt
 
 # Symbolize thread dumps (" g:<offset>" entries are libgame.so offsets).
 if grep -q "  bt:" out/headless/last_run.txt; then

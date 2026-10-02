@@ -3,10 +3,12 @@
 # collects two captures plus the exit status per galaxy under out/tour/.
 #   tools/galaxy_tour.sh [Galaxy[:scenario] ...]
 # Needs an existing save file on slot 1 (the menu script selects it).
+# HEADLESS_DATA and HEADLESS_NAND as for run_headless.sh.
 cd "$(dirname "$0")/.."
 export MSYS_NO_PATHCONV=1
 source tools/env.sh
 ADB=$(find_adb) || { echo "adb not found" >&2; exit 1; }
+SHOTS=$(dirname ${HEADLESS_NAND:-/data/local/tmp/petari/nand})/shots
 GALAXIES=("$@")
 if [ ${#GALAXIES[@]} -eq 0 ]; then
   GALAXIES=(AstroGalaxy HeavensDoorGalaxy EggStarGalaxy HoneyBeeKingdomGalaxy CosmosGardenGalaxy BattleShipGalaxy
@@ -32,6 +34,6 @@ for g in "${GALAXIES[@]}"; do
   echo "$name: $status, last frame $draws draws ${crash:+CRASH: $crash}" | tee -a out/tour/summary.txt
   rm -f out/tour/${name}_*.png
   for f in 006 007; do
-    $ADB pull /data/local/tmp/petari/shots/frame_$f.png out/tour/${name}_$f.png > /dev/null 2>&1
+    $ADB pull $SHOTS/frame_$f.png out/tour/${name}_$f.png > /dev/null 2>&1
   done
 done
