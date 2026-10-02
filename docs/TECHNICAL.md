@@ -329,6 +329,19 @@ In the diorama:
   on every refresh), and the settings panel draws the pointer's reticle into
   its own image (the laser, in the eye layer, is under it).
   `PETARI_XRSIM_LAYERS=1` does the same in the headless simulator.
+- The screen's 3D pictures (the giant screen's gameplay) have a render
+  scale of their own, moved by the same rules as the eyes' (and by the
+  runtime's counters only): from 1 (2048x1152) down to three quarters of
+  `min_resolution`. A smaller picture is drawn into a target of exactly
+  its size and goes into the lower left part of the screen layer's image,
+  shown through the layer's image rectangle, as the stereo pair's pictures
+  are (each `stereo_resolution` times the scaled size). Frames without a
+  3D camera (menus, movies) stay at the full size. Each of the two scales
+  is judged afresh when the presentation changes.
+  `PETARI_FIXED_SCALE` holds whichever is in use.
+- Meta Quest Super Resolution's sharpening is asked for only while the eye
+  layer holds the diorama: around the screen that layer is dark or
+  see-through.
 - The dynamic resolution reads Meta's performance counters
   (`XR_META_performance_metrics`: the app's and the compositor's GPU time,
   the GPU's utilization) when the runtime has them, and judges the eyes by

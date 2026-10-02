@@ -36,6 +36,7 @@
 extern "C" void port_boot(const char* dataRoot, const char* saveRoot);
 extern "C" void port_mem_set_reserved_window(uintptr_t base, size_t size);
 extern "C" void port_headless_write_png(const char* path, const unsigned char* rgba, int w, int h);
+extern "C" int port_vr_diorama(void);  // the diorama is on show (vr_game.cpp)
 
 namespace {
 
@@ -1676,8 +1677,11 @@ void renderFrame(App& a) {
     }
     // Meta Quest Super Resolution (the compositor's upscaling and
     // sharpening filter) on the eye layer.
+    // Only while it holds the diorama: around the screen it is dark or
+    // see-through, and the filter would cost the compositor its time for
+    // nothing.
     XrCompositionLayerSettingsFB layerSettings{XR_TYPE_COMPOSITION_LAYER_SETTINGS_FB};
-    if (layerCount && a.hasLayerSettings && vr::superResolution()) {
+    if (layerCount && a.hasLayerSettings && vr::superResolution() && port_vr_diorama()) {
         layerSettings.layerFlags = XR_COMPOSITION_LAYER_SETTINGS_QUALITY_SHARPENING_BIT_FB;
         layer.next = &layerSettings;
     }

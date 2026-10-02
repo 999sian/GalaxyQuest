@@ -195,6 +195,12 @@ has no effect as things are (the 3D depth while the 3D is off) is dimmed.
   its render resolution when the GPU is busy; "Now" shows the resolution it
   renders at. 1.00 is Meta's standard eye size. Higher stays sharper, but
   when the GPU cannot keep up frames come late and the view stutters.
+  On the giant screen the same happens to the screen's picture: it is
+  drawn at its full size (2048x1152) while the GPU keeps up, and smaller
+  when it does not (passthrough and the stereoscopic 3D both take GPU
+  time), down to three quarters of this setting: 0.60 of the full size at
+  the default, which is still close to what the display can show of a
+  screen 4.5 m away. The row then shows the picture's size instead.
 - **Highest resolution** (1.60 by default) is as far as it may raise it
   while the GPU has time to spare. Lower it to save battery.
 - **Refresh rate**: the display's, among those the headset offers. At
@@ -270,7 +276,9 @@ language = english
 # GPU has time to spare and drops (down to min_resolution) as soon as
 # frames are missed. Lower it to save battery.
 resolution = 1.6
-# The lowest render resolution (0.8 to 1.25; also on the VR settings panel)
+# The lowest render resolution (0.5 to 1.25; also on the VR settings panel).
+# The giant screen's picture goes down to three quarters of it (0.6 of its
+# full 2048x1152) while the GPU cannot keep up.
 min_resolution = 0.8
 # Display refresh rate in Hz. At 120 the game's 60 frames a second fit
 # the display exactly; other rates make moving things judder.

@@ -508,6 +508,15 @@ gpu::EfbTarget sFlatPair[2];    // the left and the right eye's picture
 bool sFlatRightFresh = false;   // the right one was drawn since its layer last took it
 bool sStereoFrame = false;      // the game frame on show is rendered as a stereo pair
 bool sStereoShown = false;      // the picture last finished for the screen is a stereo pair
+// The screen's 3D pictures (the giant screen's gameplay, a flight on the
+// virtual screen) follow the GPU's load as the diorama's eyes do: they are
+// drawn smaller while it cannot keep up (the screen's render scale, see
+// updateScale).  A smaller single picture goes into sFlatPair[0] and is
+// shown through the layer's image rectangle, as a pair's pictures are; menus
+// and movies keep the full size (sFlat).
+bool sScaledFrame = false;      // the game frame on show is drawn as one smaller picture
+bool sScaledShown = false;      // the picture last finished for the screen is one
+int sPictureW = 0, sPictureH = 0;  // the size of the pictures last finished in sFlatPair
 float sConvergence = 0.0f;      // game units, following the camera
 float sStereoShift = 0.0f;      // the farthest things' shift for one eye, in half screen widths
 float sStereoHudShift = 0.0f;   // the HUD's, the other way
@@ -1044,6 +1053,21 @@ namespace {
 
 const float kScaleStep = 0.05f;
 float sScale = 1.0f;  // current scale, relative to the recommended eye size
+// The same for the screen's 3D picture, relative to its full size
+// (2048x1152; each picture of a stereo pair is stereo_resolution times that).
+float sScreenScale = 1.0f;
+// Which of the two the frame on show is drawn at, and so which one the
+// GPU's load moves: the diorama's eyes, the screen's 3D picture, or neither
+// (menus, movies).
+enum { kNoScale, kEyeScale, kScreenScale };
+int sScaled = kNoScale;
+float& activeScale() { return sScaled == kScreenScale ? sScreenScale : sScale; }
+// Their limits.  The eyes: min_resolution to resolution.  The screen's
+// picture: 1 is all there is to show, and its lowest is three quarters of
+// min_resolution (0.6 at the default 0.8: 1229 pixels across, where the
+// display has about 1500 for the giant screen 4.5 m away).
+float scaleMin() { return sScaled == kScreenScale ? fminf(1.0f, fmaxf(0.5f, 0.75f * sMinScale)) : sMinScale; }
+float scaleMax() { return sScaled == kScreenScale ? 1.0f : sResolution; }
 
 const GLenum kTimeElapsed = 0x88BF;  // GL_TIME_ELAPSED_EXT
 const GLenum kGpuDisjoint = 0x8FBB;  // GL_GPU_DISJOINT_EXT
@@ -1074,6 +1098,7 @@ double sCeilingUntil = 0.0;
 float sLogWorstMs = 0.0f, sLogSumMs = 0.0f;
 int sLogCount = 0, sLogChanges = 0, sLogMissed = 0;
 float sLogMinScale = 9.0f, sLogMaxScale = 0.0f;
+float sLogScreenMin = 9.0f, sLogScreenMax = 0.0f;
 double sLogAt = 0.0;
 float sBudgetMs = 0.0f;
 
@@ -1089,14 +1114,15 @@ void initTimers() {
 // Moves to scale `s` (within the limits).  The results so far are judged
 // either way, so the minimum scale does not keep deciding to go lower.
 void setScale(float s) {
-    s = fminf(sResolution, fmaxf(sMinScale, s));
+    s = fminf(scaleMax(), fmaxf(scaleMin(), s));
     sTimedEyes = 0;
     sSlowEyes = 0;
     sWorstMs = sSecondMs = 0.0f;
     sMissed = 0;
     sChangedAt = sNow;
-    if (fabsf(s - sScale) < 0.001f) return;
-    sScale = s;
+    float& scale = activeScale();
+    if (fabsf(s - scale) < 0.001f) return;
+    scale = s;
     sLogChanges++;
 }
 
@@ -1193,49 +1219,74 @@ float fixedScale() {
     return scale;
 }
 
-// Once per game frame, before its eyes are rendered.
-void updateScale(const vr::FrameInfo& frame) {
+// Once per game frame, before it is rendered; `scaled` is what the frame is
+// drawn at (kEyeScale, kScreenScale or kNoScale).
+void updateScale(const vr::FrameInfo& frame, int scaled) {
     sNow = frame.time;
     sBudgetMs = frame.eyeBudgetMs;
-    sScale = fminf(sScale, sResolution);
-    float fixed = fixedScale();
-    if (fixed > 0.0f) {
-        if (fabsf(fixed - sScale) > 0.001f) {
-            sScale = fixed;
+    if (scaled != sScaled) {
+        // Another presentation: it has its own scale, judged afresh.
+        sScaled = scaled;
+        sTimedEyes = sSlowEyes = sMissed = 0;
+        sWorstMs = sSecondMs = 0.0f;
+        sChangedAt = sNow;
+        sCeiling = 9.0f;
+    }
+    float& scale = activeScale();
+    scale = fminf(scale, scaleMax());
+    float fixed = fminf(fixedScale(), scaleMax());
+    if (sScaled == kNoScale) {
+        if (sTimersOk) pollTimers();
+    } else if (fixed > 0.0f) {
+        if (fabsf(fixed - scale) > 0.001f) {
+            scale = fixed;
             sChangedAt = sNow;
             sLogChanges++;
+            port_log("vr: %s held at %.2f (PETARI_FIXED_SCALE)", sScaled == kScreenScale ? "screen picture scale" : "render scale", scale);
         }
         if (sTimersOk) pollTimers();
-    } else if (!metricsActive() && (!sTimersOk || sBudgetMs <= 0.0f)) {
-        sScale = fminf(fmaxf(1.0f, sMinScale), sResolution);
+    } else if (!metricsActive() && (sScaled == kScreenScale || !sTimersOk || sBudgetMs <= 0.0f)) {
+        // Nothing to go by (the screen's picture is judged by the runtime's
+        // counters only: the timers time an eye, and one eye draws it all).
+        scale = fminf(fmaxf(1.0f, scaleMin()), scaleMax());
     } else {
         if (sTimersOk) pollTimers();
         float target = metricsActive() ? kTargetM * sMetricBudgetMs : kTarget * sBudgetMs;
-        if (sScale < sMinScale - 0.001f) {
-            setScale(sMinScale);  // the minimum was raised
+        if (scale < scaleMin() - 0.001f) {
+            setScale(scaleMin());  // the minimum was raised
         } else if (sMissed >= 2) {
             // The loop fell behind at this scale: down two steps, and leave
             // this scale alone for a while.
-            sCeiling = sScale - kScaleStep;
+            sCeiling = scale - kScaleStep;
             sCeilingUntil = sNow + 20.0;
-            setScale(sScale - 2.0f * kScaleStep);
+            setScale(scale - 2.0f * kScaleStep);
         } else if (sSlowEyes >= 2) {
             // Down at once, by about the pixel share the eyes are over (the
             // second slowest: the slowest may be a one-off).
-            float s = floorf(sScale * sqrtf(target / sSecondMs) / kScaleStep + 0.001f) * kScaleStep;
-            setScale(fminf(s, sScale - kScaleStep));
+            float s = floorf(scale * sqrtf(target / sSecondMs) / kScaleStep + 0.001f) * kScaleStep;
+            setScale(fminf(s, scale - kScaleStep));
         } else if (sTimedEyes >= 24 && sNow - fmax(sChangedAt, fmax(sLastBusyAt, sLastMissAt)) > 1.5 &&
-                   (sScale + kScaleStep <= sCeiling + 0.001f || sNow > sCeilingUntil)) {
-            setScale(sScale + kScaleStep);  // headroom for a while: up a step
+                   (scale + kScaleStep <= sCeiling + 0.001f || sNow > sCeilingUntil)) {
+            setScale(scale + kScaleStep);  // headroom for a while: up a step
         }
     }
     sLogMinScale = fminf(sLogMinScale, sScale);
     sLogMaxScale = fmaxf(sLogMaxScale, sScale);
+    if (sScaled == kScreenScale) {
+        sLogScreenMin = fminf(sLogScreenMin, sScreenScale);
+        sLogScreenMax = fmaxf(sLogScreenMax, sScreenScale);
+    }
     if (sNow - sLogAt >= 10.0) {
         if (sLogAt > 0.0 && sLogCount > 0) {
             port_log("vr: render scale %.2f-%.2f (now %.2f, %d changes); eye GPU %.1f ms avg %.1f max of %.1f; %d refreshes missed", sLogMinScale,
                      sLogMaxScale, sScale, sLogChanges, sLogSumMs / sLogCount, sLogWorstMs, sBudgetMs, sLogMissed);
         }
+        if (sLogAt > 0.0 && sLogScreenMax > 0.0f) {
+            port_log("vr: screen picture scale %.2f-%.2f (now %.2f, %d changes; lowest %.2f); %d refreshes missed", sLogScreenMin, sLogScreenMax,
+                     sScreenScale, sLogChanges, fminf(1.0f, fmaxf(0.5f, 0.75f * sMinScale)), sLogMissed);
+        }
+        sLogScreenMin = 9.0f;
+        sLogScreenMax = 0.0f;
         if (sLogAt > 0.0 && (sLogAppGpuCount > 0 || sLogUtilCount > 0)) {
             port_log("vr: runtime counters: app GPU %.1f ms a frame avg %.1f max (%d samples; %.1f ms an eye allowed), compositor GPU %.1f ms a refresh, "
                      "GPU %.0f%% busy avg %.0f%% max",
@@ -1359,7 +1410,7 @@ void notePerformance(float appGpuMs, float compositorGpuMs, float gpuUtilization
         sLogUtilSum += gpuUtilization;
         sLogUtilMax = fmaxf(sLogUtilMax, gpuUtilization);
         sLogUtilCount++;
-        if (gpuUtilization > 95.0f && sVrMode) sLastBusyAt = sNow;  // a full GPU (whoever fills it): no step up
+        if (gpuUtilization > 95.0f && sScaled != kNoScale) sLastBusyAt = sNow;  // a full GPU (whoever fills it): no step up
     }
     if (appGpuMs <= 0.0f || appGpuMs == sLastAppGpuMs || eyesPerFrame <= 0 || refreshesPerFrame <= 0) return;  // no new sample
     sLastAppGpuMs = appGpuMs;
@@ -1369,9 +1420,10 @@ void notePerformance(float appGpuMs, float compositorGpuMs, float gpuUtilization
     float compositor = compositorGpuMs > 0.0f ? compositorGpuMs : 0.0f;
     sMetricBudgetMs = (refreshMs - compositor) * refreshesPerFrame / eyesPerFrame;
     sMetricsAt = sNow;
-    // Diorama frames at the current scale only, and not just after a change
-    // (the counter trails a frame or two).
-    if (!sVrMode || sNow - sChangedAt < 0.3) return;
+    // Frames drawn at a scale that follows the load only (the diorama, the
+    // screen's 3D pictures), at the current scale, and not just after a
+    // change (the counter trails a frame or two).
+    if (sScaled == kNoScale || sNow - sChangedAt < 0.3) return;
     float ms = appGpuMs / eyesPerFrame;
     sTimedEyes++;
     if (ms > sWorstMs) {
@@ -1385,11 +1437,12 @@ void notePerformance(float appGpuMs, float compositorGpuMs, float gpuUtilization
 }
 
 float renderScale() { return sScale; }
+float screenPictureScale() { return sScreenScale; }
 
 void noteMissedRefreshes(int count) {
-    // Not while the view is on the virtual screen (loading, menus), nor
-    // right after a scale change (reallocating the eye targets).
-    if (count <= 0 || !sVrMode || sNow - sChangedAt < 0.3) return;
+    // Not while the screen shows menus or a loading screen, nor right after
+    // a scale change (reallocating the targets).
+    if (count <= 0 || sScaled == kNoScale || sNow - sChangedAt < 0.3) return;
     if (sNow - sLastMissAt > 1.0) sMissed = 0;
     sMissed++;
     sLogMissed += count;
@@ -1515,18 +1568,26 @@ void beginFrame(const FrameInfo& frame) {
         std::lock_guard<std::mutex> lock(sCullLock);
         sCullValid = false;
     }
+    // The render scale of what the frame is: the diorama's eyes, or a 3D
+    // picture on the screen.
+    bool screen3d = !sVrMode && r.hasFrame() && r.camera().valid;
+    updateScale(frame, sVrMode ? kEyeScale : screen3d ? kScreenScale : kNoScale);
     // The giant screen's gameplay (any frame of it with a 3D camera) as a
-    // stereo pair.
-    sStereoFrame = sStereoScreen && sGiantScreen && !sVrMode && r.hasFrame() && r.camera().valid;
+    // stereo pair; the screen's 3D pictures at the screen's render scale.
+    sStereoFrame = sStereoScreen && sGiantScreen && screen3d;
+    float picture = (sStereoFrame ? sStereoSize : 1.0f) * (screen3d ? sScreenScale : 1.0f);
+    int pictureW = (int)lroundf(sFlat.width * picture), pictureH = (int)lroundf(sFlat.height * picture);
+    sScaledFrame = screen3d && !sStereoFrame && pictureW < sFlat.width;
     if (sStereoFrame) {
         for (gpu::EfbTarget& t : sFlatPair) {
-            ensureTarget(t, (int)lroundf(sFlat.width * sStereoSize), (int)lroundf(sFlat.height * sStereoSize));
+            ensureTarget(t, pictureW, pictureH);
         }
         updateStereo(frame, r.camera(), dt);
+    } else if (sScaledFrame) {
+        ensureTarget(sFlatPair[0], pictureW, pictureH);
     }
     // The eye targets at the current render scale (the swapchain images are
     // at swapchainScale()).
-    updateScale(frame);
     for (int e = 0; e < 2; e++) {
         float f = sScale / swapchainScale();
         ensureTarget(sEye[e], (int)lroundf(frame.eyes[e].width * f), (int)lroundf(frame.eyes[e].height * f));
@@ -1680,11 +1741,17 @@ Extent renderEye(int eye, const FrameInfo& frame, GLuint fbo, int width, int hei
             if (eye == 1) {
                 sFlatFresh = sFlatRightFresh = true;
                 sStereoShown = true;
+                sScaledShown = false;
+                sPictureW = sFlatPair[0].width;
+                sPictureH = sFlatPair[0].height;
             }
         } else if (eye == 0 && r.hasFrame()) {
-            r.render(sFlat, nullptr, nullptr, gpu::HudMode::Inline);
+            r.render(sScaledFrame ? sFlatPair[0] : sFlat, nullptr, nullptr, gpu::HudMode::Inline);
             sFlatFresh = true;
             sStereoShown = false;
+            sScaledShown = sScaledFrame;
+            sPictureW = sFlatPair[0].width;
+            sPictureH = sFlatPair[0].height;
         }
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glViewport(0, 0, width, height);
@@ -1699,7 +1766,8 @@ Extent renderEye(int eye, const FrameInfo& frame, GLuint fbo, int width, int hei
         glClearColor(0.004f * dark, 0.004f * dark, 0.012f * dark, dark);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         if (r.hasFrame() && !sUiLayers) {
-            drawPanel(sStereoFrame ? sFlatPair[eye] : sFlat, viewProj * panelModel(screenCenter(), screenWidth(), (float)sFlat.width / sFlat.height),
+            drawPanel(sStereoFrame ? sFlatPair[eye] : sScaledShown ? sFlatPair[0] : sFlat,
+                      viewProj * panelModel(screenCenter(), screenWidth(), (float)sFlat.width / sFlat.height),
                       true);
         }
     }
@@ -1980,9 +2048,9 @@ UiLayer uiLayer(int which) {
         l.visible = sUiLayers && !sVrMode && gpu::renderer().hasFrame() && (!right || sStereoShown);
         l.changed = right ? sFlatRightFresh : sFlatFresh;
         l.eye = !sStereoShown ? kBothEyes : right ? kRightEye : kLeftEye;
-        if (sStereoShown) {
-            l.imageWidth = sFlatPair[right].width;
-            l.imageHeight = sFlatPair[right].height;
+        if (sStereoShown || sScaledShown) {
+            l.imageWidth = sPictureW;
+            l.imageHeight = sPictureH;
         }
         l.position = screenCenter();
         l.width = screenWidth();
@@ -2011,7 +2079,7 @@ void drawUiLayer(int which, GLuint fbo) {
         drawQuad(sHud.color, xm::scale(2.0f), false, 1.0f);  // the unit quad over the whole image
         sHudFresh = false;
     } else if (which == kScreenLayer) {
-        drawQuad(sStereoShown ? sFlatPair[0].color : sFlat.color, xm::scale(2.0f), true, 1.0f);
+        drawQuad(sStereoShown || sScaledShown ? sFlatPair[0].color : sFlat.color, xm::scale(2.0f), true, 1.0f);
         sFlatFresh = false;
     } else if (which == kScreenRightLayer) {
         drawQuad(sFlatPair[1].color, xm::scale(2.0f), true, 1.0f);

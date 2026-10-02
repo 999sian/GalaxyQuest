@@ -152,8 +152,11 @@ bool superResolution();
 // yaw (not turn_with_camera).
 bool snapTurn(int dir);
 // The render scale now (the dynamic resolution moves it between the
-// min_resolution and resolution settings).
+// min_resolution and resolution settings), and the scale of the screen's 3D
+// pictures (the giant screen's gameplay): 1 is the full picture, and the
+// GPU's load moves it down to three quarters of min_resolution.
 float renderScale();
+float screenPictureScale();
 
 // Compositor layers for the panels that carry text (xr_app.cpp submits them
 // over the eye layer, as Meta recommends for text and UI): the compositor

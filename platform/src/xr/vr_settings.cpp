@@ -92,7 +92,13 @@ void hintPassthrough(char* out, size_t size) {
 }
 void hintStereo(char* out, size_t size) { hintScreenOnly(out, size, "A picture for each eye"); }
 void hintDiorama(char* out, size_t size) { snprintf(out, size, "%s", giantOn() ? "Used while the giant screen is off" : "How far away Mario stands"); }
-void hintScale(char* out, size_t size) { snprintf(out, size, "Now %.2f; 1.00 is Meta's standard", roundf(vr::renderScale() * 100.0f) / 100.0f); }
+void hintScale(char* out, size_t size) {
+    if (giantOn()) {
+        snprintf(out, size, "The screen's picture is at %.2f now", roundf(vr::screenPictureScale() * 100.0f) / 100.0f);
+    } else {
+        snprintf(out, size, "Now %.2f; 1.00 is Meta's standard", roundf(vr::renderScale() * 100.0f) / 100.0f);
+    }
+}
 void hintInvert(char* out, size_t size) {
     snprintf(out, size, "%s", setting("invert_camera") ? "Stick right turns the view right" : "Stick right moves the camera right");
 }
