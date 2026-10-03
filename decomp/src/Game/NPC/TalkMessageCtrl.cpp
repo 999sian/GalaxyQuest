@@ -25,6 +25,9 @@
 #include <JSystem/JGeometry/TMatrix.hpp>
 #include <JSystem/JGeometry/TVec.hpp>
 #include <revolution/mtx.h>
+#ifdef TARGET_PC
+#include "port/port.h"
+#endif
 
 TalkMessageCtrl::TalkMessageCtrl(LiveActor* pHost, const TVec3f& rArg2, MtxPtr pArg3)
     : NameObj("\x89\xef\x98\x62\x90\xa7\x8c\xe4"), mHostActor(pHost), mNodeCtrl(), mZoneID(-1), _1C(0.0f, 0.0f, 0.0f), mMsgBalloonFollowOffs(rArg2), mTalkDistance(240.0f),
@@ -161,7 +164,23 @@ void TalkMessageCtrl::rootNodePre(bool arg) {
 
         bool cond = false;
 
-        switch (branch->mIndex) {
+        u16 branchType = branch->mIndex;
+#ifdef TARGET_PC
+        // The decomp uses Korean branch IDs. EU/US discs put observatory flags
+        // at 11, demo activity at 12 and read-message flags at 13.
+        const PortDisc* disc = port_dvd_disc();
+        if (disc != nullptr && (disc->id[3] == 'P' || disc->id[3] == 'E')) {
+            if (branchType == 11) {
+                branchType = 14;
+            } else if (branchType == 12) {
+                branchType = 11;
+            } else if (branchType == 13) {
+                branchType = 12;
+            }
+        }
+#endif
+
+        switch (branchType) {
         case 0:
             return;
         case 1:

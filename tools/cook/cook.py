@@ -15,6 +15,7 @@ lists, textures, sequences, ghost data) keep their original byte order.
 import argparse
 import collections
 import concurrent.futures
+import multiprocessing
 import os
 import shutil
 import struct
@@ -262,16 +263,16 @@ def plan(data_dir, out_dir, args):
     return jobs
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('data_dir')
-    ap.add_argument('out_dir')
-    ap.add_argument('--jobs', type=int, default=os.cpu_count())
-    ap.add_argument('--only')
-    ap.add_argument('--no-audio', action='store_true')
-    ap.add_argument('--with-movies', action='store_true')
-    args = ap.parse_args()
+def convert(data_dir, out_dir, jobs=None, only=None, no_audio=False,
+            with_movies=False, progress=None):
+    """Run the same conversion from the CLI or the desktop installer.
 
+    progress(completed, total) is called in the parent process, never in
+    the conversion workers. A nonzero return means files were not converted.
+    """
+    args = argparse.Namespace(data_dir=data_dir, out_dir=out_dir,
+                              jobs=jobs or os.cpu_count(), only=only,
+                              no_audio=no_audio, with_movies=with_movies)
     # The game partition holds sys/ and files/; Dolphin extracts it to DATA/
     # under the folder it was given.
     if not os.path.isfile(os.path.join(args.data_dir, 'sys', 'fst.bin')):
@@ -285,15 +286,22 @@ def main():
     errors = cook_dol_data(args.data_dir, args.out_dir)
 
     jobs = plan(args.data_dir, args.out_dir, args)
+    if progress:
+        progress(0, len(jobs))
     t0 = time.time()
     total = collections.Counter()
     notes = collections.Counter()
-    with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as ex:
-        for stats, n, err in ex.map(process, jobs, chunksize=8):
+    # The desktop installer calls this from a thread while Tk is running.
+    # Spawn fresh workers rather than forking the GUI process on Linux.
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs,
+            mp_context=multiprocessing.get_context('spawn')) as ex:
+        for done, (stats, n, err) in enumerate(ex.map(process, jobs, chunksize=8), 1):
             total.update(stats)
             notes.update(n)
             if err:
                 errors.append(err)
+            if progress and (done % 16 == 0 or done == len(jobs)):
+                progress(done, len(jobs))
     print('cooked %d disc files in %.1fs' % (len(jobs), time.time() - t0))
     for k, v in sorted(total.items()):
         print('  %-24s %6d' % (k, v))
@@ -302,6 +310,17 @@ def main():
     for e in errors:
         print('ERROR', e)
     return 1 if errors else 0
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('data_dir')
+    ap.add_argument('out_dir')
+    ap.add_argument('--jobs', type=int, default=os.cpu_count())
+    ap.add_argument('--only')
+    ap.add_argument('--no-audio', action='store_true')
+    ap.add_argument('--with-movies', action='store_true')
+    return convert(**vars(ap.parse_args()))
 
 
 if __name__ == '__main__':

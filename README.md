@@ -10,7 +10,7 @@
 
 # GalaxyQuest
 
-**Play Super Mario Galaxy in virtual reality, natively on Meta Quest 3.**
+**Play Super Mario Galaxy in virtual reality, natively on Meta Quest 2 and 3.**
 
 Mario's universe becomes a living diorama in front of you: planets float at
 arm's length, you lean in to look around them, and you aim at star bits with
@@ -86,35 +86,71 @@ story and saves all come from the game's own code and your own game files.
 
 ## What you need
 
-- A **Meta Quest 3** (a Quest 3S should work too but is untested) with
+- A **Meta Quest 2 or 3** (both tested and working; a Quest 3S should work
+  too but is untested) with
   about 7 GB free, and a **USB-C data cable** to connect it to the computer
   (a charge-only cable does not work).
 - **Your Super Mario Galaxy disc**, dumped as an ISO, RVZ or WBFS image (for
   example with [CleanRip](https://wiibrew.org/wiki/CleanRip) on a Wii), or
   already extracted. The European (RMGP01) and American (RMGE01) discs are
   tested; the Japanese and Korean ones have not been tried yet.
-- A **computer** (Windows, macOS or Linux) with about 10 GB free, and three
-  free programs on it:
-  - [Python 3.8 or newer](https://www.python.org/downloads/), which runs
-    the converter;
-  - [adb](https://developer.android.com/tools/releases/platform-tools), the
-    Android *platform-tools*, which talks to the headset (a zip to unpack,
-    nothing to install);
-  - [Dolphin](https://dolphin-emu.org/), which extracts the disc.
-- The two downloads of the
-  [latest release](https://github.com/bigmak94/GalaxyQuest/releases/latest):
-  - [`GalaxyQuest.apk`](https://github.com/bigmak94/GalaxyQuest/releases/latest/download/GalaxyQuest.apk),
-    the app;
-  - [`GalaxyQuest-converter.zip`](https://github.com/bigmak94/GalaxyQuest/releases/latest/download/GalaxyQuest-converter.zip),
-    the Python scripts (`.py` files) that convert your game files and copy
-    them to the headset.
+- A **computer** with about 16 GB free (10 GB if your disc is already
+  extracted). The installer runs on **Windows**; macOS and Linux users can
+  follow the [manual installation steps](#installing-manually) below.
+- The [**Windows installer**](https://github.com/bigmak94/GalaxyQuest/releases/latest/download/GalaxyQuest-Installer-windows-x86_64.exe)
+  from the [latest release](https://github.com/bigmak94/GalaxyQuest/releases/latest).
+  It includes the APK, converter, Python, DolphinTool and adb, so no separate
+  downloads or terminal commands are needed.
+
+## Installing
+
+### Windows installer (recommended)
+
+1. **Enable developer mode** on the headset, connect it to your computer
+   with a USB data cable, and allow USB debugging in the headset. Follow
+   [step 1 below](#1-turn-on-developer-mode-on-the-headset) or
+   [Meta's setup guide](https://developers.meta.com/horizon/documentation/android-apps/enable-developer-mode).
+2. Download and open
+   [`GalaxyQuest-Installer-windows-x86_64.exe`](https://github.com/bigmak94/GalaxyQuest/releases/latest/download/GalaxyQuest-Installer-windows-x86_64.exe).
+3. Click **Browse** and select your own Super Mario Galaxy ISO, RVZ or WBFS
+   image. If you have already extracted the disc, select **Use an already
+   extracted folder** and choose that folder or its `DATA` folder.
+4. Select your headset if several devices are connected, then click
+   **Install**. The installer extracts the disc, converts the game files,
+   installs the app and copies the files to the headset. Movies are included
+   by default, and temporary files are cleaned up automatically.
+5. When installation finishes, put on the headset and open
+   **Library > Unknown Sources > GalaxyQuest**.
+
+Allow half an hour, most of it waiting for files to copy. For more details,
+logs and installer build instructions, see
+[docs/DESKTOP_INSTALLER.md](docs/DESKTOP_INSTALLER.md).
+
+## Installing manually
+
+If you prefer not to use the installer, or use macOS or Linux, follow the
+original steps below. You need three free programs on your computer:
+
+- [Python 3.8 or newer](https://www.python.org/downloads/), which runs
+  the converter;
+- [adb](https://developer.android.com/tools/releases/platform-tools), the
+  Android *platform-tools*, which talks to the headset (a zip to unpack,
+  nothing to install);
+- [Dolphin](https://dolphin-emu.org/), which extracts the disc.
+
+You also need the two downloads of the
+[latest release](https://github.com/bigmak94/GalaxyQuest/releases/latest):
+
+- [`GalaxyQuest.apk`](https://github.com/bigmak94/GalaxyQuest/releases/latest/download/GalaxyQuest.apk),
+  the app;
+- [`GalaxyQuest-converter.zip`](https://github.com/bigmak94/GalaxyQuest/releases/latest/download/GalaxyQuest-converter.zip),
+  the Python scripts (`.py` files) that convert your game files and copy
+  them to the headset.
 
 > **You do not need to download or clone this repository.** Every Python
 > file the steps below use is in `GalaxyQuest-converter.zip`, on the release
 > page of this repository. (They are the ones under `tools/` here: if you
 > did clone the repository, run the same commands from its root.)
-
-## Installing
 
 In short: turn on developer mode, install the app, extract your disc,
 convert it, copy the result to the headset. Allow half an hour, most of it
@@ -313,7 +349,7 @@ disc again with the current one.
 | Touch Plus | Wii | In the game |
 |---|---|---|
 | Left thumbstick | Nunchuk stick | Move |
-| A | A | Jump, talk, confirm. Hold to skip a cutscene or a dialogue |
+| A | A | Jump, talk, confirm. Hold to float as Boo Mario or skip a cutscene or a dialogue |
 | B or Y, or a flick of either controller | Shake | Spin |
 | Right trigger | B | Shoot star bits, cancel |
 | Right controller aim | Pointer | Collect star bits, grab Pull Stars, point at menus |

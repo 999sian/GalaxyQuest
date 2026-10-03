@@ -388,7 +388,7 @@ s32 TalkDirector::getDemoType(const TalkMessageCtrl* pCtrl, bool arg2) const {
     return demoType;
 }
 
-// Gets the arg-th bool of TalkDirector's booleans, which start at 0x70
+// Gets the story flag selected by the message flow's branch argument.
 bool TalkDirector::getBranchResult(u16 arg) {
     if (arg == 18) {
         return MR::isAnyPlayerLeftSupply();
@@ -402,7 +402,65 @@ bool TalkDirector::getBranchResult(u16 arg) {
         return MR::isOnLuigiHiding();
     }
 
+#ifdef TARGET_PC
+    // Pointer members move these flags away from Wii offset 0x70 on 64-bit builds.
+    switch (arg) {
+    case 0:
+        return mIsKinopioExplorerRescued;
+    case 1:
+        return mIsKinopioExplorerOrganize;
+    case 2:
+        return mIsKinopioExplorerTalkGetGrandStar2;
+    case 3:
+        return mIsKinopioExplorerTrickComet;
+    case 4:
+        return mIsKinopioExplorerTalkGetGrandStar3;
+    case 5:
+        return mIsKinopioExplorerStartMessenger;
+    case 6:
+        return mIsKinopioExplorerTalkGetGrandStar4;
+    case 7:
+        return mIsKinopioExplorerTalkGetGrandStar5;
+    case 8:
+        return mIsKinopioExplorerTalkGetGrandStar6;
+    case 9:
+        return mIsKinopioExplorerTalkGoFinalBattle;
+    case 10:
+        return mIsEndLuigiHideAndSeek;
+    case 11:
+        return mIsKinopioExplorerCompleteTrickComet;
+    case 14:
+        return mHasOneGreenStar;
+    case 15:
+        return mHasTwoGreenStars;
+    case 16:
+        return mHasThreeGreenStars;
+    case 17:
+        return mIsUnlockedRedDriver;
+    case 19:
+        return mIsActiveLuigiHideAndSeek;
+    case 20:
+        return mIsGalaxyPurpleCometLaunch;
+    case 21:
+        return misRosettaTalkTorchLecture;
+    case 22:
+        return mIsRosettaTalkTrickComet;
+    case 23:
+        return mIsRosettaTalkKoopa;
+    case 24:
+        return mIsRosettaTalkCountDownStart;
+    case 25:
+        return mIsRosettaTalkAstroDemoRecover;
+    case 26:
+        return mIsRosettaTalkTorchProgress;
+    case 27:
+        return mIsOnGameEventFlagViewNormalEnding;
+    default:
+        return false;
+    }
+#else
     return (reinterpret_cast< bool* >(this) + arg)[0x70];
+#endif
 }
 
 void TalkDirector::initBranchResult() {

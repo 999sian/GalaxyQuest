@@ -10,6 +10,7 @@ The files go to /sdcard/Android/data/com.galaxy.quest/files/game (about
 go over as one tar file that the headset unpacks.
 """
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -38,32 +39,77 @@ def find_adb():
     sys.exit('adb not found: install the Android platform-tools and put adb on PATH (or set ADB)')
 
 
-def main():
-    src = sys.argv[1] if len(sys.argv) > 1 else 'cooked'
+def adb_environment():
+    """Do not give Google's adb the frozen Python runtime's library path."""
+    env = os.environ.copy()
+    if getattr(sys, 'frozen', False) and sys.platform.startswith('linux'):
+        if 'LD_LIBRARY_PATH_ORIG' in env:
+            env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH_ORIG']
+        else:
+            env.pop('LD_LIBRARY_PATH', None)
+    return env
+
+
+def copy_data(src, adb=None, serial=None, progress=None, temp_dir=None):
+    """Copy game data; serial pins every command to the chosen headset.
+
+    progress(message) receives the packing/copying/unpacking stages.
+    temp_dir lets the installer keep the large tar on the checked disk.
+    """
     if not os.path.isfile(os.path.join(src, 'sys', 'fst.bin')):
         sys.exit('%s does not look like converted game files (no sys/fst.bin): run tools/cook/cook.py first' % src)
-    adb = find_adb()
+    adb = adb or find_adb()
+    command = [adb] + (['-s', serial] if serial else [])
 
     def run(*args):
-        subprocess.run([adb] + list(args), check=True)
+        result = subprocess.run(command + list(args), check=True, text=True,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                env=adb_environment(),
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if result.stdout.strip():
+            print(result.stdout.strip(), flush=True)
 
-    devices = subprocess.run([adb, 'devices'], check=True, capture_output=True, text=True).stdout.split('\n')[1:]
-    if not any(line.strip().endswith('device') for line in devices):
-        sys.exit('no headset found: connect it over USB, allow USB debugging in the headset, and try again')
+    if not serial:
+        devices = subprocess.run([adb, 'devices'], check=True, capture_output=True, text=True,
+                                 stdin=subprocess.DEVNULL,
+                                 env=adb_environment(),
+                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout.split('\n')[1:]
+        ready = [line.split()[0] for line in devices if line.strip().endswith('device')]
+        if not ready:
+            sys.exit('no headset found: connect it over USB, allow USB debugging in the headset, and try again')
+        if len(ready) != 1:
+            sys.exit('more than one device found: disconnect the others or use --serial SERIAL')
+        command = [adb, '-s', ready[0]]
 
-    with tempfile.TemporaryDirectory() as tmp:
+    def report(message):
+        print(message, flush=True)
+        if progress:
+            progress(message)
+
+    with tempfile.TemporaryDirectory(dir=temp_dir) as tmp:
         tar_path = os.path.join(tmp, 'game_data.tar')
-        print('packing %s' % src, flush=True)
+        report('packing %s' % src)
         with tarfile.open(tar_path, 'w') as tar:
             for name in sorted(os.listdir(src)):
                 tar.add(os.path.join(src, name), arcname=name)
-        print('copying to the headset (%.1f GB)' % (os.path.getsize(tar_path) / 1e9), flush=True)
+        report('copying to the headset (%.1f GB)' % (os.path.getsize(tar_path) / 1e9))
         run('push', tar_path, TMP)
-    print('unpacking in %s' % DEST, flush=True)
+    report('unpacking in %s' % DEST)
     # The files belong to adb's shell user and the folder is group-only: the
     # app, under its own user, reads them through "other".
-    run('shell', 'mkdir -p %s && cd %s && tar xf %s && rm %s && chmod -R a+rX %s' % (DEST, DEST, TMP, TMP, DEST))
+    run('shell', 'mkdir -p %s && cd %s && tar xf %s && rm %s && chmod -R a+rX %s' %
+        tuple(shlex.quote(path) for path in (DEST, DEST, TMP, TMP, DEST)))
     print('done: the game files are in %s' % DEST)
+
+
+def main():
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('src', nargs='?', default='cooked')
+    ap.add_argument('--serial', help='headset serial, as listed by adb devices')
+    args = ap.parse_args()
+    copy_data(args.src, serial=args.serial)
 
 
 if __name__ == '__main__':

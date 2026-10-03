@@ -637,6 +637,46 @@ void MarioActor::drawRasterScroll(f32 amplitude, s16 period, f32 wavelength) con
         return;
     }
 
+#ifdef TARGET_PC
+    // GX's one-pixel lines leave gaps when the EFB is rendered at a higher
+    // resolution. Copy the scene once and cover each native row with a
+    // textured strip; the same geometry then works for every eye/scale.
+    const u16 width = MR::getFrameBufferWidth();
+    const u16 height = MR::getScreenHeight();
+    static u8* image = new (0x20) u8[GXGetTexBufferSize(width, height, GX_TF_RGB565, GX_FALSE, 0)];
+    GXDrawDone();
+    GXTexModeSync();
+    GXPixModeSync();
+    TDDraw::setup(1, 0, 2);
+    GXSetTexCopyDst(width, height, GX_TF_RGB565, GX_FALSE);
+    GXSetTexCopySrc(0, 0, width, height);
+    GXCopyTex(image, GX_FALSE);
+    GXTexModeSync();
+    GXPixModeSync();
+    GXTexObj texture;
+    GXInitTexObj(&texture, image, width, height, GX_TF_RGB565, GX_CLAMP, GX_CLAMP, GX_FALSE);
+    GXLoadTexObj(&texture, GX_TEXMAP0);
+    const f32 phase = (_37C * JMath::TAngleConstant_< f32 >::RADIAN_DEG360()) / period;
+    const f32 spatialPhase = TWO_PI / wavelength;
+    const f32 screenWidth = MR::getScreenWidth();
+    for (u32 row = 0; row < height; row++) {
+        const f32 angle = MR::sin(spatialPhase * row) * JGeometry::TUtil< f32 >::PI();
+        const f32 offset = amplitude * MR::sin(angle + phase);
+        const f32 top = static_cast< f32 >(row) / height;
+        const f32 bottom = static_cast< f32 >(row + 1) / height;
+        GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, 4);
+        GXPosition3f32(offset, row, 0.0f);
+        GXTexCoord2f32(0.0f, top);
+        GXPosition3f32(offset + screenWidth, row, 0.0f);
+        GXTexCoord2f32(1.0f, top);
+        GXPosition3f32(offset, row + 1, 0.0f);
+        GXTexCoord2f32(0.0f, bottom);
+        GXPosition3f32(offset + screenWidth, row + 1, 0.0f);
+        GXTexCoord2f32(1.0f, bottom);
+        GXEnd();
+    }
+    GXDrawDone();
+#else
     u32 next;
     u32 stripHeight = 4;
     GXTexObj textures[2];
@@ -681,6 +721,7 @@ void MarioActor::drawRasterScroll(f32 amplitude, s16 period, f32 wavelength) con
     }
 
     GXDrawDone();
+#endif
 }
 
 void MarioActor::drawMosaic() const {
