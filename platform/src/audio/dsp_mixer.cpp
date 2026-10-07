@@ -21,6 +21,9 @@
 
 #include "JSystem/JAudio2/JASDSPInterface.hpp"
 #include "port/port.h"
+#if defined(__ARM_NEON) || defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 extern "C" u32 port_dsp_varam_base(void);
 
@@ -88,7 +91,20 @@ const u8* aram(u32 offset, u32 size) {
 }
 
 void addWithVolume(s16* dst, const s16* src, int count, u16 vol) {  // 1.15
+#if defined(__ARM_NEON) || defined(__aarch64__)
+    int i = 0;
+    int16x4_t vVol = vdup_n_s16((s16)vol);
+    for (; i + 4 <= count; i += 4) {
+        int16x4_t vSrc = vld1_s16(src + i);
+        int16x4_t vDst = vld1_s16(dst + i);
+        int16x4_t vScaled = vqrdmulh_s16(vSrc, vVol);
+        int16x4_t vRes = vqadd_s16(vDst, vScaled);
+        vst1_s16(dst + i, vRes);
+    }
+    for (; i < count; i++) dst[i] = clamp16(dst[i] + clamp16(((s32)src[i] * (s32)vol) >> 15));
+#else
     for (int i = 0; i < count; i++) dst[i] = clamp16(dst[i] + clamp16(((s32)src[i] * (s32)vol) >> 15));
+#endif
 }
 
 // Mixes src into dst with a volume ramp (1.31 volume, per-sample step);
@@ -103,6 +119,17 @@ s32 addWithRamp(s16* dst, const s16* src, s32 vol, s32 step) {
 }
 
 void scaleInPlace(s16* buf, u16 vol, int fracBits) {  // 1.15 (fracBits 15) or 4.12 (12)
+#if defined(__ARM_NEON) || defined(__aarch64__)
+    if (fracBits == 15) {
+        int16x8_t vVol = vdupq_n_s16((s16)vol);
+        for (int i = 0; i < N; i += 8) {
+            int16x8_t v = vld1q_s16(buf + i);
+            int16x8_t res = vqrdmulhq_s16(v, vVol);
+            vst1q_s16(buf + i, res);
+        }
+        return;
+    }
+#endif
     for (int i = 0; i < N; i++) buf[i] = clamp16(((s32)buf[i] * (s32)vol) >> fracBits);
 }
 
