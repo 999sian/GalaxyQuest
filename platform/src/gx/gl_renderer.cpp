@@ -537,6 +537,20 @@ void Renderer::Impl::storeBinary(const ShaderUid& uid, GLuint prog) {
 }
 
 void Renderer::Impl::startCompiler() {
+    // Mirroring melee-pc dc10687f: Some Adreno drivers/OpenGL ES contexts crash
+    // or lock up during concurrent shader compilation off the draw thread.
+    const char* forceInline = debugEnv("PETARI_GL_INLINE_COMPILE");
+    if (forceInline && atoi(forceInline) != 0) {
+        port_log("gl: PETARI_GL_INLINE_COMPILE set; background compiler disabled");
+        return;
+    }
+
+    const char* rendererStr = (const char*)glGetString(GL_RENDERER);
+    const char* disableAdrenoBg = debugEnv("PETARI_DISABLE_ADRENO_BG_COMPILE");
+    if (rendererStr && strstr(rendererStr, "Adreno") && disableAdrenoBg && atoi(disableAdrenoBg) != 0) {
+        port_log("gl: Adreno GPU detected with background compilation disabled; compiling inline on draw thread");
+        return;
+    }
     EGLDisplay dpy = eglGetCurrentDisplay();
     EGLContext share = eglGetCurrentContext();
     EGLint cfgId = 0, n = 0;
