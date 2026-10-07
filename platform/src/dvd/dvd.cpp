@@ -20,6 +20,8 @@
 #include <thread>
 #include <vector>
 
+#include <list>
+#include <unordered_map>
 #include "port/heap_routing.h"
 #include "port/port.h"
 #include "revolution/dvd.h"
@@ -43,6 +45,80 @@ struct FstEntry {
     s64 size = -1;
     int fd = -1;
 };
+
+// ---------------------------------------------------------------------------
+// In-memory file cache (adapted from melee-pc file_cache)
+// ---------------------------------------------------------------------------
+struct CacheBlock {
+    std::vector<u8> data;
+    bool pinned = false;
+    std::list<u32>::iterator lruIt;
+};
+
+static std::mutex sCacheMutex;
+static std::unordered_map<u32, CacheBlock> sMemCache;
+static std::list<u32> sCacheLru;
+static size_t sCacheBytes = 0;
+static size_t sMaxCacheBytes = 256 * 1024 * 1024; // 256 MB default RAM cache pool
+
+static bool isPinnedArchive(const std::string& name) {
+    if (name.size() < 4) return false;
+    std::string lower;
+    lower.reserve(name.size());
+    for (char c : name) lower.push_back((char)tolower((unsigned char)c));
+    return (lower.rfind(".arc") != std::string::npos ||
+            lower.rfind(".aw") != std::string::npos ||
+            lower.rfind(".szs") != std::string::npos ||
+            lower.rfind(".bcsv") != std::string::npos);
+}
+
+static bool readCachedData(u32 entry, u8* dst, size_t want, off_t offset) {
+    std::lock_guard<std::mutex> lk(sCacheMutex);
+    auto it = sMemCache.find(entry);
+    if (it == sMemCache.end()) return false;
+    const auto& buf = it->second.data;
+    if ((size_t)offset >= buf.size()) {
+        memset(dst, 0, want);
+    } else {
+        size_t avail = buf.size() - (size_t)offset;
+        size_t n = want < avail ? want : avail;
+        memcpy(dst, buf.data() + offset, n);
+        if (n < want) memset(dst + n, 0, want - n);
+    }
+    if (!it->second.pinned && it->second.lruIt != sCacheLru.begin()) {
+        sCacheLru.erase(it->second.lruIt);
+        sCacheLru.push_front(entry);
+        it->second.lruIt = sCacheLru.begin();
+    }
+    return true;
+}
+
+static void putCacheData(u32 entry, const std::string& name, std::vector<u8>&& data) {
+    std::lock_guard<std::mutex> lk(sCacheMutex);
+    if (sMemCache.count(entry)) return;
+    size_t sz = data.size();
+    bool pinned = isPinnedArchive(name);
+    if (!pinned && sz > 32 * 1024 * 1024) return; // don't cache single massive non-pinned files
+
+    while (!pinned && (sCacheBytes + sz > sMaxCacheBytes) && !sCacheLru.empty()) {
+        u32 evictEntry = sCacheLru.back();
+        auto eit = sMemCache.find(evictEntry);
+        if (eit != sMemCache.end() && !eit->second.pinned) {
+            sCacheBytes -= eit->second.data.size();
+            sMemCache.erase(eit);
+        }
+        sCacheLru.pop_back();
+    }
+
+    sCacheBytes += sz;
+    auto& slot = sMemCache[entry];
+    slot.data = std::move(data);
+    slot.pinned = pinned;
+    if (!pinned) {
+        sCacheLru.push_front(entry);
+        slot.lruIt = sCacheLru.begin();
+    }
+}
 
 static std::vector<FstEntry> sFst;
 static std::string sDataRoot;
@@ -355,21 +431,33 @@ static void workerMain() {
         }
         DVDCommandBlock* b = req.block;
         s32 result;
-        int fd = openEntry(req.entry);
-        if (fd < 0) {
-            result = -1;
+        if (readCachedData(req.entry, (u8*)b->addr, b->length, (off_t)b->offset)) {
+            b->transferredSize = b->length;
+            result = (s32)b->length;
         } else {
-            u8* dst = (u8*)b->addr;
-            size_t want = b->length;
-            ssize_t got = pread(fd, dst, want, (off_t)b->offset);
-            if (got < 0) {
+            int fd = openEntry(req.entry);
+            if (fd < 0) {
                 result = -1;
             } else {
-                if ((size_t)got < want) {
-                    memset(dst + got, 0, want - (size_t)got);  // past EOF the drive returns adjacent data
+                u8* dst = (u8*)b->addr;
+                size_t want = b->length;
+                ssize_t got = pread(fd, dst, want, (off_t)b->offset);
+                if (got < 0) {
+                    result = -1;
+                } else {
+                    if ((size_t)got < want) {
+                        memset(dst + got, 0, want - (size_t)got);  // past EOF the drive returns adjacent data
+                    }
+                    b->transferredSize = b->length;
+                    result = (s32)b->length;
+
+                    // Cache whole file when reading from start if it qualifies
+                    s64 totalSz = sFst[req.entry].size;
+                    if (b->offset == 0 && (size_t)result == (size_t)totalSz && totalSz > 0) {
+                        std::vector<u8> copyBuf(dst, dst + result);
+                        putCacheData(req.entry, sFst[req.entry].name, std::move(copyBuf));
+                    }
                 }
-                b->transferredSize = b->length;
-                result = (s32)b->length;
             }
         }
         {
